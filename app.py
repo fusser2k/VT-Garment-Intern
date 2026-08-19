@@ -46,6 +46,11 @@ from cutplan2 import (
     compute_multi_decoration_jobcuts,
     BUILDING_1_LINES,
     BUILDING_2_LINES,
+    translate,
+    column_label,
+    js_translations,
+    DEFAULT_LANG,
+    SUPPORTED_LANGS,
 )
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -71,6 +76,30 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB upload limit
 SESSIONS = {}
 
 WIP_PREVIEW_ROW_LIMIT = 200
+
+
+def _get_lang() -> str:
+    lang = session.get("lang", DEFAULT_LANG)
+    return lang if lang in SUPPORTED_LANGS else DEFAULT_LANG
+
+
+# Jinja globals: {{ t('key') }} and {{ col_label(col) }}, always bound to the
+# CURRENT request's language (read from the session on every call, so a
+# language switch takes effect immediately without needing a fresh login).
+app.jinja_env.globals["t"] = lambda key: translate(key, _get_lang())
+app.jinja_env.globals["col_label"] = lambda col: column_label(col, _get_lang())
+app.jinja_env.filters["col_label"] = lambda col: column_label(col, _get_lang())
+
+
+@app.route("/set-language/<lang>", methods=["GET"])
+def set_language(lang):
+    if lang in SUPPORTED_LANGS:
+        session["lang"] = lang
+    try:
+        active_tab = int(request.args.get("tab", 1))
+    except ValueError:
+        active_tab = 1
+    return redirect(url_for("index", tab=active_tab))
 
 
 def _get_sid():
@@ -125,6 +154,7 @@ def _cutplan_for_display(cutplan, extraction):
 def _render(active_tab: int):
     sid = _get_sid()
     state = SESSIONS[sid]
+    lang = _get_lang()
     return render_template(
         "index.html",
         now=datetime.now(),
@@ -133,8 +163,12 @@ def _render(active_tab: int):
         wip=state["wip"],
         cutplan=_cutplan_for_display(state["cutplan"], state["extraction"]),
         merge_columns=MERGE_COLUMNS,
+        OUTPUT_COLUMNS=OUTPUT_COLUMNS,
         building_1_lines=BUILDING_1_LINES,
         building_2_lines=BUILDING_2_LINES,
+        current_lang=lang,
+        supported_langs=SUPPORTED_LANGS,
+        js_t=js_translations(lang),
     )
 
 
@@ -163,7 +197,7 @@ def extract():
         input_path = os.path.join(UPLOAD_DIR, f"{job_id}_{file.filename}")
         file.save(input_path)
     else:
-        flash("Please choose an input .xlsx file, or check 'use bundled sample data'.")
+        flash(translate("please_choose_input_file", _get_lang()))
         return redirect(url_for("index", tab=1))
 
     run_datetime = datetime.now()
@@ -223,7 +257,7 @@ def wip_upload():
         file.save(saved_path)
         display_filename = file.filename
     else:
-        flash("Please choose a WIP .xlsx file to upload, or check 'use bundled sample data'.")
+        flash(translate("please_choose_wip_file", _get_lang()))
         return redirect(url_for("index", tab=2))
 
     job_id = uuid.uuid4().hex[:8]
@@ -285,12 +319,12 @@ def cut_plan():
     extraction = SESSIONS[sid]["extraction"]
 
     if not extraction or "df" not in extraction:
-        flash("Run Tab 1 (Buffer Cutting Order Form) first — the cut plan is built from that extracted data.")
+        flash(translate("run_tab1_first", _get_lang()))
         return redirect(url_for("index", tab=3))
 
     shift_choice = request.form.get("shift_choice")
     if shift_choice not in ("Morning", "Afternoon"):
-        flash("Please choose whether you're planning for Morning or Afternoon.")
+        flash(translate("please_choose_shift", _get_lang()))
         return redirect(url_for("index", tab=3))
 
     run_datetime = datetime.now()

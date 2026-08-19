@@ -28,6 +28,7 @@ from .model import (
     split_plan_by_building,
     compute_multi_decoration_jobcuts,
 )
+from .i18n import translate, column_label, js_translations, DEFAULT_LANG, SUPPORTED_LANGS
 
 __all__ = [
     "load_input",
@@ -58,4 +59,9 @@ __all__ = [
     "get_building",
     "split_plan_by_building",
     "compute_multi_decoration_jobcuts",
+    "translate",
+    "column_label",
+    "js_translations",
+    "DEFAULT_LANG",
+    "SUPPORTED_LANGS",
 ]

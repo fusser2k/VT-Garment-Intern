@@ -6,6 +6,12 @@
 <style>
   body { font-family: Arial, Helvetica, sans-serif; max-width: 1300px; margin: 40px auto; color: #222; padding: 0 20px; }
   .topbar { display: flex; justify-content: space-between; align-items: flex-start; }
+  .topbar-right { display: flex; align-items: center; gap: 20px; }
+  .lang-switch { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #555; }
+  .lang-switch-label { margin-right: 2px; }
+  .lang-btn { color: #1F4E78; text-decoration: none; padding: 4px 9px; border-radius: 5px; border: 1px solid #cfe0f0; font-weight: bold; }
+  .lang-btn:hover { background: #eef3f9; }
+  .lang-btn.active { background: #1F4E78; color: #fff; border-color: #1F4E78; }
   h1 { font-size: 22px; margin: 0; }
   .clock { text-align: right; color: #555; font-size: 13px; line-height: 1.5; white-space: nowrap; }
   .clock .date { font-weight: bold; color: #1F4E78; font-size: 15px; }
@@ -96,17 +102,24 @@
 </head>
 <body>
   <div class="topbar">
-    <h1>Cut Planning Model v2</h1>
-    <div class="clock">
-      <div class="date" id="clock-date">{{ now.strftime('%A, %d %B %Y') }}</div>
-      <div id="clock-time">{{ now.strftime('%H:%M:%S') }}</div>
+    <h1>{{ t('app_title') }}</h1>
+    <div class="topbar-right">
+      <div class="lang-switch">
+        <span class="lang-switch-label">{{ t('language_label') }}:</span>
+        <a href="{{ url_for('set_language', lang='en', tab=active_tab) }}" class="lang-btn {{ 'active' if current_lang == 'en' else '' }}">EN</a>
+        <a href="{{ url_for('set_language', lang='th', tab=active_tab) }}" class="lang-btn {{ 'active' if current_lang == 'th' else '' }}">ไทย</a>
+      </div>
+      <div class="clock">
+        <div class="date" id="clock-date">{{ now.strftime('%A, %d %B %Y') }}</div>
+        <div id="clock-time">{{ now.strftime('%H:%M:%S') }}</div>
+      </div>
     </div>
   </div>
 
   <div class="tabs">
-    <button type="button" class="tab {{ 'active' if active_tab == 1 else '' }}" data-tab="1">Tab 1: Buffer Cutting Order Form</button>
-    <button type="button" class="tab {{ 'active' if active_tab == 2 else '' }}" data-tab="2">Tab 2: WIP Upload</button>
-    <button type="button" class="tab {{ 'active' if active_tab == 3 else '' }}" data-tab="3">Tab 3: Cut Plan</button>
+    <button type="button" class="tab {{ 'active' if active_tab == 1 else '' }}" data-tab="1">{{ t('tab1_label') }}</button>
+    <button type="button" class="tab {{ 'active' if active_tab == 2 else '' }}" data-tab="2">{{ t('tab2_label') }}</button>
+    <button type="button" class="tab {{ 'active' if active_tab == 3 else '' }}" data-tab="3">{{ t('tab3_label') }}</button>
   </div>
 
   {% with messages = get_flashed_messages() %}
@@ -120,42 +133,28 @@
   <!-- ===================== TAB 1: Buffer Cutting Order Form ===================== -->
   <div class="tab-panel {{ 'active' if active_tab == 1 else '' }}" id="tab-panel-1">
     <p class="desc">
-      Upload the Buffer Cutting Order Form Excel file and it's extracted into the 14-field
-      schema below, right on this tab. Only rows whose <strong>Sewing Line</strong> starts with
-      <code>VS</code> are kept — everything else is filtered out automatically. If the file is
-      missing any of the 14 fields, that field is simply left blank in the extracted output.
+      {{ t('tab1_desc') }}
     </p>
 
     <form class="upload-form" action="{{ url_for('extract') }}" method="post" enctype="multipart/form-data">
-      <label for="input_file">Buffer Cutting Order Form (.xlsx)</label>
+      <label for="input_file">{{ t('tab1_file_label') }}</label>
       <input type="file" id="input_file" name="input_file" accept=".xlsx">
 
       <div class="checkbox-row">
         <input type="checkbox" id="use_sample" name="use_sample" value="1">
-        <label for="use_sample" style="font-weight: normal; margin: 0;">Use bundled sample data instead</label>
+        <label for="use_sample" style="font-weight: normal; margin: 0;">{{ t('use_sample_data') }}</label>
       </div>
 
-      <button type="submit">Extract data</button>
+      <button type="submit">{{ t('extract_data_btn') }}</button>
     </form>
 
     {% if not extraction %}
     <div class="cols">
-      Target fields (extracted in this order):
+      {{ t('target_fields_label') }}
       <ol class="field-list">
-        <li>Sewing Line</li>
-        <li>JobCut - Suffix</li>
-        <li>Table ID</li>
-        <li>Colorway</li>
-        <li>Mark Type</li>
-        <li>Layer</li>
-        <li>Qty</li>
-        <li>Qty Complete</li>
-        <li>Difference</li>
-        <li>% Complete</li>
-        <li>Status</li>
-        <li>Sewing Target Per Day</li>
-        <li>Table No. (Mark Type 101)</li>
-        <li>Decoration</li>
+        {% for col in OUTPUT_COLUMNS %}
+          <li>{{ col_label(col) }}</li>
+        {% endfor %}
       </ol>
     </div>
     {% endif %}
@@ -164,17 +163,17 @@
     <div class="results-section">
       {% if extraction.missing_columns %}
       <div class="warn-info">
-        These fields were not found in the input file and are shown blank: {{ extraction.missing_columns | join(', ') }}
+        {{ t('fields_not_found') }} {{ extraction.missing_columns | map('col_label') | join(', ') }}
       </div>
       {% endif %}
 
       <div class="actions">
         <div class="run-info">
-          Extracted {{ extraction.now.strftime('%Y-%m-%d %H:%M') }} &middot; {{ extraction.row_count }} row(s) kept
-          {% if extraction.filtered_out_count %} &middot; {{ extraction.filtered_out_count }} row(s) filtered out (Sewing Line not starting with "VS"){% endif %}
-          {% if not extraction.missing_columns %} &middot; all 14 fields found{% endif %}
+          {{ t('extracted_at') }} {{ extraction.now.strftime('%Y-%m-%d %H:%M') }} &middot; {{ extraction.row_count }} {{ t('rows_kept') }}
+          {% if extraction.filtered_out_count %} &middot; {{ extraction.filtered_out_count }} {{ t('rows_filtered_out') }}{% endif %}
+          {% if not extraction.missing_columns %} &middot; {{ t('all_fields_found') }}{% endif %}
         </div>
-        <a class="download-btn" href="{{ url_for('download', filename=extraction.download_filename) }}">Download Excel</a>
+        <a class="download-btn" href="{{ url_for('download', filename=extraction.download_filename) }}">{{ t('download_excel') }}</a>
       </div>
 
       {% if extraction.rows %}
@@ -183,7 +182,7 @@
           <thead>
             <tr>
               {% for col in extraction.columns %}
-                <th>{{ col }}</th>
+                <th>{{ col_label(col) }}</th>
               {% endfor %}
             </tr>
           </thead>
@@ -203,7 +202,7 @@
         </table>
       </div>
       {% else %}
-        <p class="empty">No rows were extracted from this input file (after filtering).</p>
+        <p class="empty">{{ t('no_rows_extracted') }}</p>
       {% endif %}
     </div>
     {% endif %}
@@ -212,47 +211,42 @@
   <!-- ===================== TAB 2: WIP Upload ===================== -->
   <div class="tab-panel {{ 'active' if active_tab == 2 else '' }}" id="tab-panel-2">
     <p class="desc">
-      Upload a Work-in-Process (WIP) buffer report here. It's extracted into a fixed set of
-      fields matching the known WIP template (per-sewing-line targets, actuals, WIP quantities,
-      lead times, and shortfall reasons). If a file doesn't match that template, it falls back to
-      a raw, no-schema preview instead of failing outright.
+      {{ t('tab2_desc') }}
     </p>
 
     <div class="note-info">
-      <strong>Tab 3 (Cut Planning)</strong> does not use this file yet — it's being built
-      independently for now. Once it's ready to factor in WIP levels, this tab can be wired in.
+      {{ t('tab2_note') }}
     </div>
 
     <form class="upload-form" action="{{ url_for('wip_upload') }}" method="post" enctype="multipart/form-data">
-      <label for="wip_file">WIP file (.xlsx)</label>
+      <label for="wip_file">{{ t('wip_file_label') }}</label>
       <input type="file" id="wip_file" name="wip_file" accept=".xlsx">
 
       <div class="checkbox-row">
         <input type="checkbox" id="wip_use_sample" name="use_sample" value="1">
-        <label for="wip_use_sample" style="font-weight: normal; margin: 0;">Use bundled sample WIP data instead</label>
+        <label for="wip_use_sample" style="font-weight: normal; margin: 0;">{{ t('use_sample_wip_data') }}</label>
       </div>
 
-      <button type="submit">Upload WIP file</button>
+      <button type="submit">{{ t('upload_wip_btn') }}</button>
     </form>
 
     {% if wip %}
     <div class="results-section">
       {% if not wip.structured %}
       <div class="warn-info">
-        This file didn't match the known WIP template (couldn't find the "ไลน์เย็บ" header marker
-        in column B), so it's shown here as a raw, unmapped preview instead.
+        {{ t('wip_template_mismatch') }}
       </div>
       {% endif %}
 
       <div class="actions">
         <div class="run-info">
-          Uploaded {{ wip.now.strftime('%Y-%m-%d %H:%M') }} &middot; <strong>{{ wip.filename }}</strong>
-          &middot; {{ wip.row_count }} row(s) &middot; {{ wip.columns | length }} column(s)
-          {% if wip.truncated %} &middot; showing first {{ wip.preview_row_count }} rows{% endif %}
-          {% if wip.structured %} &middot; matched the WIP template{% endif %}
+          {{ t('uploaded_at') }} {{ wip.now.strftime('%Y-%m-%d %H:%M') }} &middot; <strong>{{ wip.filename }}</strong>
+          &middot; {{ wip.row_count }} {{ t('rows_kept') }} &middot; {{ wip.columns | length }} {{ t('columns_count') }}
+          {% if wip.truncated %} &middot; {{ t('showing_first_rows') }} {{ wip.preview_row_count }} {{ t('rows_word') }}{% endif %}
+          {% if wip.structured %} &middot; {{ t('matched_wip_template') }}{% endif %}
         </div>
         {% if wip.download_filename %}
-        <a class="download-btn" href="{{ url_for('download_wip', filename=wip.download_filename) }}">Download Excel</a>
+        <a class="download-btn" href="{{ url_for('download_wip', filename=wip.download_filename) }}">{{ t('download_excel') }}</a>
         {% endif %}
       </div>
 
@@ -262,7 +256,7 @@
           <thead>
             <tr>
               {% for col in wip.columns %}
-                <th>{{ col }}</th>
+                <th>{{ col_label(col) }}</th>
               {% endfor %}
             </tr>
           </thead>
@@ -278,7 +272,7 @@
         </table>
       </div>
       {% else %}
-        <p class="empty">This file has no rows.</p>
+        <p class="empty">{{ t('no_rows_in_file') }}</p>
       {% endif %}
     </div>
     {% endif %}
@@ -312,9 +306,9 @@
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}">
               <input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}">
               {% if row['_multi_decoration'] and not is_cont %}
-                <div class="decoration-flag" title="This JobCut has more than one Mark Type needing decoration — you don't have to plan every Mark Type, or plan enough tables to fully reach the Sewing target per day.">
-                  <span class="decoration-flag-text">&#9873; Multiple Mark Types need decoration</span>
-                  <button type="button" class="decoration-flag-dismiss" title="Dismiss this flag">&#10005;</button>
+                <div class="decoration-flag" title="{{ t('decoration_flag_title') }}">
+                  <span class="decoration-flag-text">{{ t('decoration_flag_text') }}</span>
+                  <button type="button" class="decoration-flag-dismiss" title="{{ t('js_dismiss_flag') }}">&#10005;</button>
                 </div>
               {% endif %}
               <div class="orig-value"></div>
@@ -327,19 +321,19 @@
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
           {% endif %}
         {% endfor %}
-        <td class="action"><button type="button" class="remove-btn" title="Remove row">&#10005;</button></td>
+        <td class="action"><button type="button" class="remove-btn" title="{{ t('js_remove_row') }}">&#10005;</button></td>
       </tr>
     {% endfor %}
   {% endmacro %}
 
   {% macro render_building_block(building_key, building_label, building_data) %}
-    <h3 class="building-heading">{{ building_label }} of {{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }}</h3>
+    <h3 class="building-heading">{{ building_label }} {{ t('of_word') }} {{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }}</h3>
     <div class="actions">
       <div class="run-info">
-        <span id="cutplan-row-count-{{ building_key }}">{{ building_data.row_count }}</span> table row(s) planned
+        <span id="cutplan-row-count-{{ building_key }}">{{ building_data.row_count }}</span> {{ t('table_rows_planned') }}
       </div>
       <div class="toolbar">
-        <button type="button" class="btn btn-secondary cutplan-add-row-btn" data-building="{{ building_key }}">+ Add row</button>
+        <button type="button" class="btn btn-secondary cutplan-add-row-btn" data-building="{{ building_key }}">{{ t('add_row_btn') }}</button>
       </div>
     </div>
     {% if building_data.rows %}
@@ -348,7 +342,7 @@
         <thead>
           <tr>
             {% for col in cutplan.columns %}
-              <th>{{ col }}</th>
+              <th>{{ col_label(col) }}</th>
             {% endfor %}
             <th></th>
           </tr>
@@ -359,88 +353,67 @@
       </table>
     </div>
     {% else %}
-      <p class="empty">Nothing to plan for {{ building_label }} — no incomplete tables found.</p>
+      <p class="empty">{{ t('nothing_to_plan') }} {{ building_label }} — {{ t('no_incomplete_tables') }}</p>
     {% endif %}
   {% endmacro %}
 
   <div class="tab-panel {{ 'active' if active_tab == 3 else '' }}" id="tab-panel-3">
     <p class="desc">
-      Plans which cutting tables to work on first, per Sewing Line / JobCut - Suffix / Mark Type.
-      Completed tables are skipped. Colorways sharing the same Table ID are combined into one
-      quantity. Tables are planned smallest Table ID first, adding tables until the running
-      quantity reaches that Mark Type's daily sewing target. Output is split into two tables by
-      building, based on Sewing Line.
+      {{ t('tab3_desc') }}
     </p>
 
     <div class="note-info">
-      This tab is built from <strong>Tab 1's</strong> extracted data. It does <strong>not</strong>
-      use Tab 2 (WIP Upload) yet — that will be wired up once the WIP file's template is
-      finalized.
+      {{ t('tab3_note') }}
     </div>
 
     <form class="upload-form" action="{{ url_for('cut_plan') }}" method="post">
-      <label>Which shift are you planning for right now?</label>
+      <label>{{ t('shift_choice_question') }}</label>
       <div class="shift-choice-row">
         <label class="shift-choice-option">
           <input type="radio" name="shift_choice" value="Morning" checked>
-          Morning <span class="shift-choice-hint">(quantity goes to this afternoon)</span>
+          {{ t('shift_morning') }} <span class="shift-choice-hint">{{ t('shift_morning_hint') }}</span>
         </label>
         <label class="shift-choice-option">
           <input type="radio" name="shift_choice" value="Afternoon">
-          Afternoon <span class="shift-choice-hint">(quantity goes to tomorrow morning)</span>
+          {{ t('shift_afternoon') }} <span class="shift-choice-hint">{{ t('shift_afternoon_hint') }}</span>
         </label>
       </div>
-      <button type="submit">Generate cut plan</button>
+      <button type="submit">{{ t('generate_cut_plan_btn') }}</button>
     </form>
 
     {% if cutplan %}
     <div class="results-section">
       <div class="flag-notice" id="partial-plan-flag">
         <div class="flag-notice-text">
-          <strong>Reminder:</strong> if a JobCut has more than one Mark Type that needs
-          decoration, you don't have to plan every Mark Type, and you don't have to plan enough
-          tables to fully reach the Sewing target per day — it's fine to plan only some tables
-          and leave the rest for later. For example, you can stop after a few cutting tables
-          instead of planning enough to hit the full target.
+          <strong>{{ t('flag_notice_title') }}</strong> {{ t('flag_notice_text') }}
         </div>
-        <button type="button" class="flag-dismiss-btn" id="dismiss-flag-btn" title="Dismiss this notice">&#10005;</button>
+        <button type="button" class="flag-dismiss-btn" id="dismiss-flag-btn" title="{{ t('js_dismiss_notice') }}">&#10005;</button>
       </div>
 
       <div class="edit-note">
-        Every cell below is editable — including <strong>Cut Plan Qty</strong> and
-        <strong>Diff</strong>. Editing a row's <strong>Cut Plan Qty</strong> updates that same
-        row's Morning/Afternoon to match. Editing a row's <strong>Table No.</strong> looks up
-        that table's real quantity from Tab 1's data. Editing <strong>Cut Plan Qty</strong> or
-        <strong>Sewing target per day</strong> re-checks which tables are needed — more tables
-        get pulled in if the target now needs them, and tables beyond what's needed get dropped.
-        Use <strong>+ Add row</strong> to plan an extra table by hand, or the <strong>✕</strong>
-        next to a row to drop it. <strong>Note</strong> starts blank. Nothing is saved until you
-        click <strong>Save changes &amp; Download Excel</strong> — that saves both buildings'
-        tables together into one workbook.
+        {{ t('edit_note') }}
       </div>
 
       <div class="actions">
         <div class="run-info">
-          Generated {{ cutplan.run_info.run_datetime.strftime('%Y-%m-%d %H:%M') }} &middot;
-          Detected as a <strong>{{ cutplan.run_info.shift_label }}</strong> run &middot;
-          Planned quantity assigned to <strong>{{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }} {{ cutplan.run_info.shift_label }}</strong>
-          &middot; <span id="cutplan-row-count-total">{{ cutplan.row_count }}</span> table row(s) planned total
+          {{ t('generated_label') }} {{ cutplan.run_info.run_datetime.strftime('%Y-%m-%d %H:%M') }} &middot;
+          {{ t('detected_as') }} <strong>{{ t('shift_morning') if cutplan.run_info.shift_label == 'Morning' else t('shift_afternoon') }}</strong> &middot;
+          {{ t('planned_qty_assigned') }} <strong>{{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }} {{ t('shift_morning') if cutplan.run_info.shift_label == 'Morning' else t('shift_afternoon') }}</strong>
+          &middot; <span id="cutplan-row-count-total">{{ cutplan.row_count }}</span> {{ t('table_rows_planned_total') }}
         </div>
         <div class="toolbar">
-          <button type="button" class="btn btn-primary" id="cutplan-save-btn">Save changes &amp; Download Excel</button>
+          <button type="button" class="btn btn-primary" id="cutplan-save-btn">{{ t('save_changes_btn') }}</button>
           <span class="status" id="cutplan-status-msg"></span>
         </div>
       </div>
 
-      {{ render_building_block('b1', 'Building 1', cutplan.buildings['Building 1']) }}
-      {{ render_building_block('b2', 'Building 2', cutplan.buildings['Building 2']) }}
+      {{ render_building_block('b1', t('building1_label'), cutplan.buildings['Building 1']) }}
+      {{ render_building_block('b2', t('building2_label'), cutplan.buildings['Building 2']) }}
       {% if cutplan.buildings['Unassigned'].row_count > 0 %}
         <div class="note-info">
-          These Sewing Lines don't match either building's list — kept here so nothing from the
-          plan is lost. Update the building lists in <code>cutplan2/model.py</code> if they
-          should belong to Building 1 or 2.
+          {{ t('unassigned_note') }}
         </div>
-        {{ render_building_block('unassigned', 'Unassigned', cutplan.buildings['Unassigned']) }}
+        {{ render_building_block('unassigned', t('unassigned_label'), cutplan.buildings['Unassigned']) }}
       {% endif %}
     </div>
     {% endif %}
@@ -472,6 +445,9 @@
       const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
       const BUILDING_1_LINES = {{ building_1_lines | tojson }};
       const BUILDING_2_LINES = {{ building_2_lines | tojson }};
+      // Translated strings for JS-driven status text/tooltips, in the
+      // CURRENT session's language (see cutplan2/i18n.py::js_translations).
+      const T = {{ js_t | tojson }};
       // Set of "Sewing Line|JobCut - Suffix" keys that have more than one
       // Mark Type needing decoration - drives the dismissible flag badge on
       // the JobCut - Suffix cell. Rebuilt on the initial page load; kept
@@ -585,7 +561,7 @@
               const flagDismiss = document.createElement("button");
               flagDismiss.type = "button";
               flagDismiss.className = "decoration-flag-dismiss";
-              flagDismiss.title = "Dismiss this flag";
+              flagDismiss.title = T.dismiss_flag;
               flagDismiss.innerHTML = "&#10005;";
               flagDiv.appendChild(flagText);
               flagDiv.appendChild(flagDismiss);
@@ -610,7 +586,7 @@
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "remove-btn";
-        removeBtn.title = "Remove row";
+        removeBtn.title = T.remove_row;
         removeBtn.innerHTML = "&#10005;";
         actionTd.appendChild(removeBtn);
         tr.appendChild(actionTd);
@@ -720,11 +696,11 @@
         if (current !== original) {
           const label = document.createElement("span");
           label.className = "orig-label";
-          label.textContent = `Original: ${original === "" ? "(blank)" : original}`;
+          label.textContent = `${T.original_prefix} ${original === "" ? T.blank : original}`;
           const revertBtn = document.createElement("button");
           revertBtn.type = "button";
           revertBtn.className = "revert-btn";
-          revertBtn.title = "Undo this edit";
+          revertBtn.title = T.undo_edit;
           revertBtn.innerHTML = "&#10005;";
           origDiv.appendChild(label);
           origDiv.appendChild(revertBtn);
@@ -880,7 +856,7 @@
       }
 
       async function recalcFromServer() {
-        statusEl.textContent = "Recalculating…";
+        statusEl.textContent = T.recalculating;
         statusEl.className = "status";
 
         const rows = collectAllRows();
@@ -897,9 +873,9 @@
           }
           const data2 = await resp.json();
           renderAllBuildings(data2.rows);
-          statusEl.textContent = "Plan updated.";
+          statusEl.textContent = T.plan_updated;
         } catch (err) {
-          statusEl.textContent = `Error: ${err.message}`;
+          statusEl.textContent = `${T.error_prefix} ${err.message}`;
           statusEl.className = "status error";
         }
       }
@@ -918,16 +894,16 @@
           const markType = strVal(tr, "Mark Type");
           const tableNo = strVal(tr, "Table No.");
 
-          statusEl.textContent = "Looking up table…";
+          statusEl.textContent = T.looking_up_table;
           statusEl.className = "status";
 
           try {
             const qty = await lookupTableQty(sewingLine, jobcutSuffix, markType, tableNo);
             assignQtyToShift(tr, qty);
             recalcGroupQtyDiff(tr);
-            statusEl.textContent = "Table quantity updated.";
+            statusEl.textContent = T.table_qty_updated;
           } catch (err) {
-            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.textContent = `${T.error_prefix} ${err.message}`;
             statusEl.className = "status error";
           }
         });
@@ -1014,7 +990,7 @@
       const saveBtn = document.getElementById("cutplan-save-btn");
       if (saveBtn) {
         saveBtn.addEventListener("click", async () => {
-          statusEl.textContent = "Saving…";
+          statusEl.textContent = T.saving;
           statusEl.className = "status";
 
           const rows = collectAllRows();
@@ -1049,10 +1025,10 @@
 
             const names = files.map((f) => f.filename).join(", ");
             statusEl.textContent = files.length
-              ? `Saved. Downloading: ${names}`
-              : "Saved (nothing to download - both buildings are empty).";
+              ? `${T.saved_downloading} ${names}`
+              : T.saved_nothing;
           } catch (err) {
-            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.textContent = `${T.error_prefix} ${err.message}`;
             statusEl.className = "status error";
           }
         });

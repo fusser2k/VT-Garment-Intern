@@ -18,6 +18,24 @@ Switching tabs is instant (client-side) and doesn't lose what's on the other
 tabs — upload something on Tab 1, switch to Tab 2, upload something there,
 and Tab 1's results are still exactly as you left them.
 
+## Language: English / Thai
+
+**EN** / **ไทย** buttons in the top-right switch the entire UI — labels,
+buttons, descriptions, flash messages, table column headers on all three
+tabs, and the JavaScript-driven status text (Saving…, Plan updated…, etc.).
+The choice is stored in your browser session and applies across all three
+tabs immediately.
+
+Internally, only the *display* text changes — every internal column name
+used in the code (`Sewing Line`, `Cut Plan Qty`, `data-col` attributes in
+the HTML, Python dict keys, etc.) always stays in English, so translations
+never risk breaking any of the app's logic. All translated strings live in
+one place: `cutplan2/i18n.py` — `TRANSLATIONS` for UI text and
+`COLUMN_LABELS` for table headers. To add a language, add a third language
+code there (e.g. `"vi"`) to every entry, add it to `SUPPORTED_LANGS`, and
+add a corresponding button next to the EN/ไทย ones in
+`templates/index.html`'s topbar.
+
 ## Tab 1: the 14 extracted fields
 
 ```
