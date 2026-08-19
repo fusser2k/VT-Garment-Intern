@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Cut Planning Model v2</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; max-width: 1300px; margin: 40px auto; color: #222; padding: 0 20px; }
+  .topbar { display: flex; justify-content: space-between; align-items: flex-start; }
+  h1 { font-size: 22px; margin: 0; }
+  .clock { text-align: right; color: #555; font-size: 13px; line-height: 1.5; white-space: nowrap; }
+  .clock .date { font-weight: bold; color: #1F4E78; font-size: 15px; }
+
+  /* Tabs */
+  .tabs { display: flex; gap: 4px; margin-top: 22px; border-bottom: 2px solid #ddd; }
+  .tab { padding: 10px 18px; font-size: 14px; font-weight: bold; border-radius: 6px 6px 0 0; cursor: pointer; color: #555; background: #f2f2f2; border: none; }
+  .tab.active { background: #1F4E78; color: #fff; cursor: default; }
+  .tab.placeholder { color: #888; }
+  .tab-panel { padding-top: 20px; display: none; }
+  .tab-panel.active { display: block; }
+
+  p.desc { color: #555; line-height: 1.5; }
+  form.upload-form { border: 1px solid #ddd; border-radius: 8px; padding: 20px 24px; margin-top: 16px; }
+  label { display: block; margin-bottom: 8px; font-weight: bold; }
+  input[type=file] { margin-bottom: 16px; }
+  .checkbox-row { margin-bottom: 16px; font-weight: normal; display: flex; align-items: center; gap: 8px; }
+  button { background: #1F4E78; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 15px; cursor: pointer; }
+  button:hover { background: #163a58; }
+  .flash { background: #fdecea; color: #b3261e; padding: 10px 14px; border-radius: 6px; margin: 16px 0; }
+  .cols { color: #555; font-size: 13px; background: #f6f8fa; padding: 12px 16px; border-radius: 6px; margin-top: 20px; line-height: 1.6; }
+  code { background: #eee; padding: 1px 5px; border-radius: 3px; }
+  .field-list { columns: 2; margin: 6px 0 0 0; padding-left: 18px; }
+
+  /* Results */
+  .results-section { margin-top: 30px; }
+  .actions { display: flex; justify-content: space-between; align-items: center; margin: 16px 0; flex-wrap: wrap; gap: 12px; }
+  .run-info { background: #eef3f9; border: 1px solid #cfe0f0; color: #1F4E78; padding: 10px 16px; border-radius: 6px; font-size: 13px; }
+  .warn-info { background: #fdecea; border: 1px solid #f3c8c2; color: #b3261e; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .note-info { background: #fff8e6; border: 1px solid #f0dca0; color: #7a5c00; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .flag-notice { display: flex; align-items: flex-start; gap: 12px; background: #eaf4ea; border: 1px solid #b7dbb7; color: #1e5c1e; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
+  .flag-notice-text { flex: 1; line-height: 1.5; }
+  .flag-dismiss-btn { background: none; border: none; color: #1e5c1e; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; flex-shrink: 0; }
+  .flag-dismiss-btn:hover { color: #0d3d0d; }
+  .building-heading { color: #1F4E78; font-size: 17px; margin: 24px 0 8px 0; padding-top: 12px; border-top: 1px solid #eee; }
+  .decoration-flag { display: flex; align-items: center; gap: 4px; background: #fff3d6; border: 1px solid #f0c674; border-radius: 4px; padding: 2px 5px; margin-top: 3px; font-size: 10px; color: #7a5200; line-height: 1.3; }
+  .decoration-flag-text { flex: 1; }
+  .decoration-flag-dismiss { background: none; border: none; color: #7a5200; cursor: pointer; font-size: 10px; line-height: 1; padding: 0 2px; flex-shrink: 0; }
+  .decoration-flag-dismiss:hover { color: #4d3400; }
+  .shift-choice-row { display: flex; gap: 24px; margin-bottom: 16px; }
+  .shift-choice-option { font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .shift-choice-hint { color: #777; font-size: 12px; font-weight: normal; }
+  .edit-note { color: #555; font-size: 13px; background: #f6f8fa; padding: 10px 16px; border-radius: 6px; margin-bottom: 14px; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .btn { border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .btn-primary { background: #1F4E78; color: #fff; }
+  .btn-primary:hover { background: #163a58; }
+  .btn-secondary { background: #fff; color: #1F4E78; border: 1px solid #1F4E78; }
+  .btn-secondary:hover { background: #eef3f9; }
+  .status { font-size: 13px; color: #1a7f37; min-width: 160px; }
+  .status.error { color: #b3261e; }
+  a.download-btn { background: #1F4E78; color: #fff; border: none; padding: 10px 20px; border-radius: 6px; font-size: 15px; cursor: pointer; text-decoration: none; display: inline-block; }
+  a.download-btn:hover { background: #163a58; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: center; }
+  th { background: #1F4E78; color: #fff; position: sticky; top: 0; z-index: 1; }
+  tr:nth-child(even) { background: #f6f8fa; }
+  tr.group-a { background: #DCE6F1; }
+  tr.group-b { background: #ffffff; }
+  tr.new-jobcut td { border-top: 2px solid #7C99B8; }
+  tr.new-sewing-line td { border-top: 3px solid #1F4E78; }
+  td.continuation-cell { border-top: none; }
+  td.continuation-cell input { color: transparent; }
+  td.continuation-cell input:focus { color: #222; }
+  td input { width: 100%; box-sizing: border-box; border: 1px solid transparent; background: transparent; font-family: Arial, Helvetica, sans-serif; font-size: 13px; text-align: center; padding: 4px; border-radius: 3px; }
+  td input:focus { border: 1px solid #1F4E78; background: #fff; outline: none; }
+  td.note input { text-align: left; color: #b3261e; font-style: italic; }
+  td.readonly input { color: #444; background: #f0f2f5; }
+  td.action { white-space: nowrap; }
+  .orig-value { font-size: 10px; color: #999; text-align: center; margin-top: 1px; min-height: 14px; display: flex; align-items: center; justify-content: center; gap: 4px; }
+  td.note .orig-value { justify-content: flex-start; }
+  .orig-label { color: #999; }
+  .revert-btn { background: none; border: none; color: #1F4E78; cursor: pointer; font-size: 10px; line-height: 1; padding: 0 2px; text-decoration: none; }
+  .revert-btn:hover { color: #b3261e; }
+  td.edited input { background: #fff8e6; border: 1px solid #f0dca0; }
+  .remove-btn { background: none; border: none; color: #b3261e; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; }
+  .remove-btn:hover { text-decoration: underline; }
+  .table-wrap { max-height: 60vh; overflow: auto; border: 1px solid #ddd; border-radius: 6px; }
+  .empty { color: #555; padding: 20px; }
+  .status-Pending { color: #b36b00; font-weight: bold; }
+  .status-Completed { color: #1a7f37; font-weight: bold; }
+  .status-InProgress { color: #1F4E78; font-weight: bold; }
+
+  /* Tab 3 placeholder */
+  .placeholder-box { border: 1px dashed #ccc; border-radius: 8px; padding: 30px; text-align: center; color: #666; margin-top: 16px; }
+  .placeholder-box h3 { color: #1F4E78; margin-top: 0; }
+</style>
+</head>
+<body>
+  <div class="topbar">
+    <h1>Cut Planning Model v2</h1>
+    <div class="clock">
+      <div class="date" id="clock-date">{{ now.strftime('%A, %d %B %Y') }}</div>
+      <div id="clock-time">{{ now.strftime('%H:%M:%S') }}</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button type="button" class="tab {{ 'active' if active_tab == 1 else '' }}" data-tab="1">Tab 1: Buffer Cutting Order Form</button>
+    <button type="button" class="tab {{ 'active' if active_tab == 2 else '' }}" data-tab="2">Tab 2: WIP Upload</button>
+    <button type="button" class="tab {{ 'active' if active_tab == 3 else '' }}" data-tab="3">Tab 3: Cut Plan</button>
+  </div>
+
+  {% with messages = get_flashed_messages() %}
+    {% if messages %}
+      {% for m in messages %}
+        <div class="flash">{{ m }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <!-- ===================== TAB 1: Buffer Cutting Order Form ===================== -->
+  <div class="tab-panel {{ 'active' if active_tab == 1 else '' }}" id="tab-panel-1">
+    <p class="desc">
+      Upload the Buffer Cutting Order Form Excel file and it's extracted into the 14-field
+      schema below, right on this tab. Only rows whose <strong>Sewing Line</strong> starts with
+      <code>VS</code> are kept — everything else is filtered out automatically. If the file is
+      missing any of the 14 fields, that field is simply left blank in the extracted output.
+    </p>
+
+    <form class="upload-form" action="{{ url_for('extract') }}" method="post" enctype="multipart/form-data">
+      <label for="input_file">Buffer Cutting Order Form (.xlsx)</label>
+      <input type="file" id="input_file" name="input_file" accept=".xlsx">
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="use_sample" name="use_sample" value="1">
+        <label for="use_sample" style="font-weight: normal; margin: 0;">Use bundled sample data instead</label>
+      </div>
+
+      <button type="submit">Extract data</button>
+    </form>
+
+    {% if not extraction %}
+    <div class="cols">
+      Target fields (extracted in this order):
+      <ol class="field-list">
+        <li>Sewing Line</li>
+        <li>JobCut - Suffix</li>
+        <li>Table ID</li>
+        <li>Colorway</li>
+        <li>Mark Type</li>
+        <li>Layer</li>
+        <li>Qty</li>
+        <li>Qty Complete</li>
+        <li>Difference</li>
+        <li>% Complete</li>
+        <li>Status</li>
+        <li>Sewing Target Per Day</li>
+        <li>Table No. (Mark Type 101)</li>
+        <li>Decoration</li>
+      </ol>
+    </div>
+    {% endif %}
+
+    {% if extraction %}
+    <div class="results-section">
+      {% if extraction.missing_columns %}
+      <div class="warn-info">
+        These fields were not found in the input file and are shown blank: {{ extraction.missing_columns | join(', ') }}
+      </div>
+      {% endif %}
+
+      <div class="actions">
+        <div class="run-info">
+          Extracted {{ extraction.now.strftime('%Y-%m-%d %H:%M') }} &middot; {{ extraction.row_count }} row(s) kept
+          {% if extraction.filtered_out_count %} &middot; {{ extraction.filtered_out_count }} row(s) filtered out (Sewing Line not starting with "VS"){% endif %}
+          {% if not extraction.missing_columns %} &middot; all 14 fields found{% endif %}
+        </div>
+        <a class="download-btn" href="{{ url_for('download', filename=extraction.download_filename) }}">Download Excel</a>
+      </div>
+
+      {% if extraction.rows %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {% for col in extraction.columns %}
+                <th>{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in extraction.rows %}
+              <tr>
+                {% for col in extraction.columns %}
+                  {% if col == 'Status' %}
+                    <td class="status-{{ row[col] | replace(' ', '') }}">{{ row[col] }}</td>
+                  {% else %}
+                    <td>{{ row[col] }}</td>
+                  {% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="empty">No rows were extracted from this input file (after filtering).</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ===================== TAB 2: WIP Upload ===================== -->
+  <div class="tab-panel {{ 'active' if active_tab == 2 else '' }}" id="tab-panel-2">
+    <p class="desc">
+      Upload a Work-in-Process (WIP) buffer report here. It's extracted into a fixed set of
+      fields matching the known WIP template (per-sewing-line targets, actuals, WIP quantities,
+      lead times, and shortfall reasons). If a file doesn't match that template, it falls back to
+      a raw, no-schema preview instead of failing outright.
+    </p>
+
+    <div class="note-info">
+      <strong>Tab 3 (Cut Planning)</strong> does not use this file yet — it's being built
+      independently for now. Once it's ready to factor in WIP levels, this tab can be wired in.
+    </div>
+
+    <form class="upload-form" action="{{ url_for('wip_upload') }}" method="post" enctype="multipart/form-data">
+      <label for="wip_file">WIP file (.xlsx)</label>
+      <input type="file" id="wip_file" name="wip_file" accept=".xlsx">
+
+      <div class="checkbox-row">
+        <input type="checkbox" id="wip_use_sample" name="use_sample" value="1">
+        <label for="wip_use_sample" style="font-weight: normal; margin: 0;">Use bundled sample WIP data instead</label>
+      </div>
+
+      <button type="submit">Upload WIP file</button>
+    </form>
+
+    {% if wip %}
+    <div class="results-section">
+      {% if not wip.structured %}
+      <div class="warn-info">
+        This file didn't match the known WIP template (couldn't find the "ไลน์เย็บ" header marker
+        in column B), so it's shown here as a raw, unmapped preview instead.
+      </div>
+      {% endif %}
+
+      <div class="actions">
+        <div class="run-info">
+          Uploaded {{ wip.now.strftime('%Y-%m-%d %H:%M') }} &middot; <strong>{{ wip.filename }}</strong>
+          &middot; {{ wip.row_count }} row(s) &middot; {{ wip.columns | length }} column(s)
+          {% if wip.truncated %} &middot; showing first {{ wip.preview_row_count }} rows{% endif %}
+          {% if wip.structured %} &middot; matched the WIP template{% endif %}
+        </div>
+        {% if wip.download_filename %}
+        <a class="download-btn" href="{{ url_for('download_wip', filename=wip.download_filename) }}">Download Excel</a>
+        {% endif %}
+      </div>
+
+      {% if wip.rows %}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              {% for col in wip.columns %}
+                <th>{{ col }}</th>
+              {% endfor %}
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in wip.rows %}
+              <tr>
+                {% for col in wip.columns %}
+                  <td>{{ row[col] }}</td>
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+        <p class="empty">This file has no rows.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ===================== TAB 3: Cut Plan ===================== -->
+  {% macro render_cutplan_tbody(building_key, rows) %}
+    {% set ns = namespace(current_key='', toggle=False, prev_sewing_line=none, prev_jobcut=none) %}
+    {% for row in rows %}
+      {% set key = row['Sewing Line']|string + '|' + row['JobCut - Suffix']|string + '|' + row['Mark Type']|string %}
+      {% if key != ns.current_key %}
+        {% set ns.toggle = not ns.toggle %}
+        {% set ns.current_key = key %}
+      {% endif %}
+      {% set jobcut_key = row['Sewing Line']|string + '|' + row['JobCut - Suffix']|string %}
+      {% if ns.prev_sewing_line is not none and row['Sewing Line']|string != ns.prev_sewing_line %}
+        {% set row_border_class = 'new-sewing-line' %}
+      {% elif ns.prev_jobcut is not none and jobcut_key != ns.prev_jobcut %}
+        {% set row_border_class = 'new-jobcut' %}
+      {% else %}
+        {% set row_border_class = '' %}
+      {% endif %}
+      {% set ns.prev_sewing_line = row['Sewing Line']|string %}
+      {% set ns.prev_jobcut = jobcut_key %}
+      <tr class="{{ 'group-a' if ns.toggle else 'group-b' }} {{ row_border_class }}">
+        {% for col in cutplan.columns %}
+          {% set is_cont = col in merge_columns and row['_cont'].get(col, False) %}
+          {% if col == 'Note' %}
+            <td class="note" data-col="{{ col }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
+          {% elif col == 'JobCut - Suffix' %}
+            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}">
+              <input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}">
+              {% if row['_multi_decoration'] and not is_cont %}
+                <div class="decoration-flag" title="This JobCut has more than one Mark Type needing decoration — you don't have to plan every Mark Type, or plan enough tables to fully reach the Sewing target per day.">
+                  <span class="decoration-flag-text">&#9873; Multiple Mark Types need decoration</span>
+                  <button type="button" class="decoration-flag-dismiss" title="Dismiss this flag">&#10005;</button>
+                </div>
+              {% endif %}
+              <div class="orig-value"></div>
+            </td>
+          {% elif col in ['Cut Plan Qty', 'Diff'] %}
+            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
+          {% elif col in ['Sewing target per day', 'Table No.', 'Cut Plan Morning', 'Cut Plan Afternoon'] %}
+            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
+          {% else %}
+            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
+          {% endif %}
+        {% endfor %}
+        <td class="action"><button type="button" class="remove-btn" title="Remove row">&#10005;</button></td>
+      </tr>
+    {% endfor %}
+  {% endmacro %}
+
+  {% macro render_building_block(building_key, building_label, building_data) %}
+    <h3 class="building-heading">{{ building_label }} of {{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }}</h3>
+    <div class="actions">
+      <div class="run-info">
+        <span id="cutplan-row-count-{{ building_key }}">{{ building_data.row_count }}</span> table row(s) planned
+      </div>
+      <div class="toolbar">
+        <button type="button" class="btn btn-secondary cutplan-add-row-btn" data-building="{{ building_key }}">+ Add row</button>
+      </div>
+    </div>
+    {% if building_data.rows %}
+    <div class="table-wrap">
+      <table id="cutplan-table-{{ building_key }}">
+        <thead>
+          <tr>
+            {% for col in cutplan.columns %}
+              <th>{{ col }}</th>
+            {% endfor %}
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="cutplan-tbody-{{ building_key }}" class="cutplan-tbody" data-building="{{ building_key }}">
+          {{ render_cutplan_tbody(building_key, building_data.rows) }}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <p class="empty">Nothing to plan for {{ building_label }} — no incomplete tables found.</p>
+    {% endif %}
+  {% endmacro %}
+
+  <div class="tab-panel {{ 'active' if active_tab == 3 else '' }}" id="tab-panel-3">
+    <p class="desc">
+      Plans which cutting tables to work on first, per Sewing Line / JobCut - Suffix / Mark Type.
+      Completed tables are skipped. Colorways sharing the same Table ID are combined into one
+      quantity. Tables are planned smallest Table ID first, adding tables until the running
+      quantity reaches that Mark Type's daily sewing target. Output is split into two tables by
+      building, based on Sewing Line.
+    </p>
+
+    <div class="note-info">
+      This tab is built from <strong>Tab 1's</strong> extracted data. It does <strong>not</strong>
+      use Tab 2 (WIP Upload) yet — that will be wired up once the WIP file's template is
+      finalized.
+    </div>
+
+    <form class="upload-form" action="{{ url_for('cut_plan') }}" method="post">
+      <label>Which shift are you planning for right now?</label>
+      <div class="shift-choice-row">
+        <label class="shift-choice-option">
+          <input type="radio" name="shift_choice" value="Morning" checked>
+          Morning <span class="shift-choice-hint">(quantity goes to this afternoon)</span>
+        </label>
+        <label class="shift-choice-option">
+          <input type="radio" name="shift_choice" value="Afternoon">
+          Afternoon <span class="shift-choice-hint">(quantity goes to tomorrow morning)</span>
+        </label>
+      </div>
+      <button type="submit">Generate cut plan</button>
+    </form>
+
+    {% if cutplan %}
+    <div class="results-section">
+      <div class="flag-notice" id="partial-plan-flag">
+        <div class="flag-notice-text">
+          <strong>Reminder:</strong> if a JobCut has more than one Mark Type that needs
+          decoration, you don't have to plan every Mark Type, and you don't have to plan enough
+          tables to fully reach the Sewing target per day — it's fine to plan only some tables
+          and leave the rest for later. For example, you can stop after a few cutting tables
+          instead of planning enough to hit the full target.
+        </div>
+        <button type="button" class="flag-dismiss-btn" id="dismiss-flag-btn" title="Dismiss this notice">&#10005;</button>
+      </div>
+
+      <div class="edit-note">
+        Every cell below is editable — including <strong>Cut Plan Qty</strong> and
+        <strong>Diff</strong>. Editing a row's <strong>Cut Plan Qty</strong> updates that same
+        row's Morning/Afternoon to match. Editing a row's <strong>Table No.</strong> looks up
+        that table's real quantity from Tab 1's data. Editing <strong>Cut Plan Qty</strong> or
+        <strong>Sewing target per day</strong> re-checks which tables are needed — more tables
+        get pulled in if the target now needs them, and tables beyond what's needed get dropped.
+        Use <strong>+ Add row</strong> to plan an extra table by hand, or the <strong>✕</strong>
+        next to a row to drop it. <strong>Note</strong> starts blank. Nothing is saved until you
+        click <strong>Save changes &amp; Download Excel</strong> — that saves both buildings'
+        tables together into one workbook.
+      </div>
+
+      <div class="actions">
+        <div class="run-info">
+          Generated {{ cutplan.run_info.run_datetime.strftime('%Y-%m-%d %H:%M') }} &middot;
+          Detected as a <strong>{{ cutplan.run_info.shift_label }}</strong> run &middot;
+          Planned quantity assigned to <strong>{{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }} {{ cutplan.run_info.shift_label }}</strong>
+          &middot; <span id="cutplan-row-count-total">{{ cutplan.row_count }}</span> table row(s) planned total
+        </div>
+        <div class="toolbar">
+          <button type="button" class="btn btn-primary" id="cutplan-save-btn">Save changes &amp; Download Excel</button>
+          <span class="status" id="cutplan-status-msg"></span>
+        </div>
+      </div>
+
+      {{ render_building_block('b1', 'Building 1', cutplan.buildings['Building 1']) }}
+      {{ render_building_block('b2', 'Building 2', cutplan.buildings['Building 2']) }}
+      {% if cutplan.buildings['Unassigned'].row_count > 0 %}
+        <div class="note-info">
+          These Sewing Lines don't match either building's list — kept here so nothing from the
+          plan is lost. Update the building lists in <code>cutplan2/model.py</code> if they
+          should belong to Building 1 or 2.
+        </div>
+        {{ render_building_block('unassigned', 'Unassigned', cutplan.buildings['Unassigned']) }}
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <script>
+    // Tab switching — pure client-side, all three panels already rendered in the DOM.
+    document.querySelectorAll(".tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const target = btn.getAttribute("data-tab");
+        document.querySelectorAll(".tab").forEach((b) => b.classList.remove("active"));
+        document.querySelectorAll(".tab-panel").forEach((p) => p.classList.remove("active"));
+        btn.classList.add("active");
+        document.getElementById(`tab-panel-${target}`).classList.add("active");
+      });
+    });
+
+    // ---- Tab 3: Cut Plan — editable tables (Building 1 / Building 2 / Unassigned) ----
+    (function () {
+      const allTbodies = Array.from(document.querySelectorAll(".cutplan-tbody"));
+      if (allTbodies.length === 0) return; // no cut plan generated yet on this page load
+
+      const JOB_ID = {{ (cutplan.job_id if cutplan else "") | tojson }};
+      const COLUMNS = {{ (cutplan.columns if cutplan else []) | tojson }};
+      const GROUP_COLS = ["Sewing Line", "JobCut - Suffix", "Mark Type"];
+      const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"];
+      const CURRENT_SHIFT = {{ (cutplan.run_info.shift_label if cutplan else "Morning") | tojson }};
+      const NUMERIC_COLS = ["Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"];
+      const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
+      const BUILDING_1_LINES = {{ building_1_lines | tojson }};
+      const BUILDING_2_LINES = {{ building_2_lines | tojson }};
+      // Set of "Sewing Line|JobCut - Suffix" keys that have more than one
+      // Mark Type needing decoration - drives the dismissible flag badge on
+      // the JobCut - Suffix cell. Rebuilt on the initial page load; kept
+      // through client-side row rebuilds (recalculation) too.
+      const MULTI_DECORATION_KEYS = new Set({{ (cutplan.multi_decoration_keys if cutplan else []) | tojson }});
+
+      const statusEl = document.getElementById("cutplan-status-msg");
+      const totalRowCountEl = document.getElementById("cutplan-row-count-total");
+
+      function getBuildingKey(sewingLine) {
+        const s = String(sewingLine ?? "").trim();
+        if (BUILDING_1_LINES.includes(s)) return "b1";
+        if (BUILDING_2_LINES.includes(s)) return "b2";
+        return "unassigned";
+      }
+
+      function getTbody(buildingKey) {
+        return document.getElementById(`cutplan-tbody-${buildingKey}`);
+      }
+
+      // ---- Persistent baseline ("Original") values ----
+      // Captured ONCE from the freshly-generated plan on initial page load,
+      // keyed by table identity (Sewing Line + JobCut - Suffix + Mark Type +
+      // Table No.). This does NOT get overwritten by later recalculations -
+      // "Original" always means "what Generate cut plan produced," not
+      // "whatever the last recalculation happened to show."
+      const ORIGINAL_BASELINE = {};
+
+      function rowIdentityKey(getVal) {
+        return GROUP_COLS.map((c) => String(getVal(c) ?? "")).join("|") + "|" + String(getVal("Table No.") ?? "");
+      }
+
+      function captureInitialBaseline() {
+        allTbodies.forEach((tb) => {
+          Array.from(tb.querySelectorAll("tr")).forEach((tr) => {
+            const key = rowIdentityKey((c) => strVal(tr, c));
+            const entry = {};
+            COLUMNS.forEach((col) => { entry[col] = strVal(tr, col); });
+            ORIGINAL_BASELINE[key] = entry;
+          });
+        });
+      }
+
+      function cellInput(tr, col) {
+        const td = tr.querySelector(`td[data-col="${col}"]`);
+        return td ? td.querySelector("input") : null;
+      }
+      function numVal(tr, col) {
+        const el = cellInput(tr, col);
+        const v = el ? parseFloat(el.value) : 0;
+        return isNaN(v) ? 0 : v;
+      }
+      function strVal(tr, col) {
+        const el = cellInput(tr, col);
+        return el ? el.value : "";
+      }
+      function updateRowCount(tbodyEl) {
+        const buildingKey = tbodyEl.dataset.building;
+        const el = document.getElementById(`cutplan-row-count-${buildingKey}`);
+        if (el) el.textContent = tbodyEl.querySelectorAll("tr").length;
+        if (totalRowCountEl) {
+          const total = allTbodies.reduce((sum, tb) => sum + tb.querySelectorAll("tr").length, 0);
+          totalRowCountEl.textContent = total;
+        }
+      }
+
+      // Build one <tr>, populated from rowData if given (server response / rebuild),
+      // or blank if rowData is null (the "+ Add row" case). contFlags (optional)
+      // marks which MERGE_COLUMNS cells should render blank/merged-looking
+      // because they repeat the row above.
+      function buildRow(rowData, groupCssClass, contFlags) {
+        const tr = document.createElement("tr");
+        tr.className = groupCssClass || "group-b";
+
+        // Look up this exact table's TRUE original values (from the initial
+        // fresh generation), if we have one - a row that existed back then
+        // keeps comparing against that, no matter how many recalculations
+        // have happened since. A row with no baseline entry (brand new, only
+        // appeared via recalculation or "+ Add row") has nothing to compare
+        // against yet, so it starts unedited.
+        const baselineEntry = rowData ? ORIGINAL_BASELINE[rowIdentityKey((c) => rowData[c])] : null;
+
+        COLUMNS.forEach((col) => {
+          const td = document.createElement("td");
+          td.setAttribute("data-col", col);
+          if (col === "Note") td.className = "note";
+          if (contFlags && MERGE_COLUMNS.includes(col) && contFlags[col]) {
+            td.classList.add("continuation-cell");
+          }
+          const input = document.createElement("input");
+          input.type = NUMERIC_COLS.includes(col) ? "number" : "text";
+
+          const startValue = rowData
+            ? (rowData[col] !== undefined && rowData[col] !== null ? rowData[col] : "")
+            : (["Cut Plan Qty", "Diff", "Cut Plan Morning", "Cut Plan Afternoon"].includes(col) ? "0" : "");
+          input.value = startValue;
+          input.dataset.original = baselineEntry ? (baselineEntry[col] ?? startValue) : startValue;
+
+          td.appendChild(input);
+
+          if (col === "JobCut - Suffix") {
+            const isContJobcut = contFlags && contFlags["JobCut - Suffix"];
+            const key = `${rowData ? rowData["Sewing Line"] : ""}|${startValue}`;
+            if (!isContJobcut && MULTI_DECORATION_KEYS.has(key)) {
+              const flagDiv = document.createElement("div");
+              flagDiv.className = "decoration-flag";
+              flagDiv.title = "This JobCut has more than one Mark Type needing decoration — you don't have to plan every Mark Type, or plan enough tables to fully reach the Sewing target per day.";
+              const flagText = document.createElement("span");
+              flagText.className = "decoration-flag-text";
+              flagText.textContent = "\u2691 Multiple Mark Types need decoration";
+              const flagDismiss = document.createElement("button");
+              flagDismiss.type = "button";
+              flagDismiss.className = "decoration-flag-dismiss";
+              flagDismiss.title = "Dismiss this flag";
+              flagDismiss.innerHTML = "&#10005;";
+              flagDiv.appendChild(flagText);
+              flagDiv.appendChild(flagDismiss);
+              td.appendChild(flagDiv);
+            }
+          }
+
+          const origDiv = document.createElement("div");
+          origDiv.className = "orig-value";
+          td.appendChild(origDiv);
+          tr.appendChild(td);
+        });
+        // Show the "Original: X" indicator right away for any cell that
+        // already differs from its true baseline (e.g. an edit that carried
+        // through a recalculation) - not just future edits.
+        COLUMNS.forEach((col) => {
+          const input = tr.querySelector(`td[data-col="${col}"] input`);
+          if (input) updateOriginalIndicator(input);
+        });
+        const actionTd = document.createElement("td");
+        actionTd.className = "action";
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "remove-btn";
+        removeBtn.title = "Remove row";
+        removeBtn.innerHTML = "&#10005;";
+        actionTd.appendChild(removeBtn);
+        tr.appendChild(actionTd);
+        return tr;
+      }
+
+      // Rebuild the whole tbody from a fresh list of row dicts (from the server),
+      // re-applying the same zebra-striping-per-group, Sewing Line / JobCut
+      // divider borders, and merged/blanked-repeat-value styling used on
+      // initial render.
+      function computeContinuationFlags(rows) {
+        const flags = [];
+        let prev = null;
+        rows.forEach((row) => {
+          const rowFlags = {};
+          if (!prev) {
+            MERGE_COLUMNS.forEach((c) => { rowFlags[c] = false; });
+          } else {
+            const sameSewingLine = String(row["Sewing Line"] ?? "") === String(prev["Sewing Line"] ?? "");
+            const sameJobcut = sameSewingLine && String(row["JobCut - Suffix"] ?? "") === String(prev["JobCut - Suffix"] ?? "");
+            const sameMarkType = sameJobcut && String(row["Mark Type"] ?? "") === String(prev["Mark Type"] ?? "");
+            // Sewing Line and JobCut - Suffix show/hide together, so Sewing
+            // Line re-displays at the start of every JobCut, not just once
+            // for the whole Sewing Line block.
+            rowFlags["Sewing Line"] = sameJobcut;
+            rowFlags["JobCut - Suffix"] = sameJobcut;
+            rowFlags["Mark Type"] = sameMarkType;
+            ["Sewing target per day", "Cut Plan Qty", "Diff"].forEach((c) => {
+              rowFlags[c] = sameMarkType && String(row[c] ?? "") === String(prev[c] ?? "");
+            });
+          }
+          flags.push(rowFlags);
+          prev = row;
+        });
+        return flags;
+      }
+
+      // Render a fresh list of rows into ONE specific tbody (used both for
+      // a single building's rows, and internally by renderAllBuildings).
+      function renderRowsIntoTbody(tbodyEl, rows) {
+        tbodyEl.innerHTML = "";
+        let currentKey = null;
+        let toggle = false;
+        let prevSewingLine = null;
+        let prevJobcut = null;
+        const contFlagsList = computeContinuationFlags(rows);
+        rows.forEach((row, idx) => {
+          const key = GROUP_COLS.map((c) => String(row[c] ?? "")).join("|");
+          if (key !== currentKey) {
+            toggle = !toggle;
+            currentKey = key;
+          }
+          const sewingLine = String(row["Sewing Line"] ?? "");
+          const jobcutKey = sewingLine + "|" + String(row["JobCut - Suffix"] ?? "");
+
+          const tr = buildRow(row, toggle ? "group-a" : "group-b", contFlagsList[idx]);
+          if (prevSewingLine !== null && sewingLine !== prevSewingLine) {
+            tr.classList.add("new-sewing-line");
+          } else if (prevJobcut !== null && jobcutKey !== prevJobcut) {
+            tr.classList.add("new-jobcut");
+          }
+          prevSewingLine = sewingLine;
+          prevJobcut = jobcutKey;
+
+          tbodyEl.appendChild(tr);
+        });
+        updateRowCount(tbodyEl);
+      }
+
+      // Split a combined list of rows (e.g. a /recalc-cut-plan response) by
+      // building, and re-render each building's own tbody. Each building's
+      // merge/continuation grouping is computed independently, scoped to
+      // just that building's rows - matching how the initial page render
+      // (and the Excel export) group things.
+      function renderAllBuildings(rows) {
+        const byBuilding = { b1: [], b2: [], unassigned: [] };
+        rows.forEach((row) => {
+          byBuilding[getBuildingKey(row["Sewing Line"])].push(row);
+        });
+        allTbodies.forEach((tb) => {
+          const key = tb.dataset.building;
+          renderRowsIntoTbody(tb, byBuilding[key] || []);
+        });
+      }
+
+      // Show/hide the "Original: X" indicator (+ a revert button) under a
+      // cell, based on whether its current value differs from the baseline
+      // set when the row was last (re)rendered. Continuation cells (part of
+      // a merged/blanked block) never show this - they're meant to always
+      // look empty, even if their underlying value gets updated by a group
+      // recalculation; the "real" indicator lives on the block's top cell.
+      function updateOriginalIndicator(input) {
+        const td = input.closest("td");
+        const origDiv = td ? td.querySelector(".orig-value") : null;
+        if (!origDiv) return;
+
+        if (td.classList.contains("continuation-cell")) {
+          origDiv.innerHTML = "";
+          td.classList.remove("edited");
+          return;
+        }
+
+        const original = input.dataset.original ?? "";
+        const current = input.value ?? "";
+        origDiv.innerHTML = "";
+
+        if (current !== original) {
+          const label = document.createElement("span");
+          label.className = "orig-label";
+          label.textContent = `Original: ${original === "" ? "(blank)" : original}`;
+          const revertBtn = document.createElement("button");
+          revertBtn.type = "button";
+          revertBtn.className = "revert-btn";
+          revertBtn.title = "Undo this edit";
+          revertBtn.innerHTML = "&#10005;";
+          origDiv.appendChild(label);
+          origDiv.appendChild(revertBtn);
+          td.classList.add("edited");
+        } else {
+          td.classList.remove("edited");
+        }
+      }
+
+      // Recompute a row's Diff (= Cut Plan Qty - Sewing target per day) from
+      // its current values, and refresh Diff's own "Original" indicator.
+      function recalcRowDiff(tr) {
+        const qty = numVal(tr, "Cut Plan Qty");
+        const target = numVal(tr, "Sewing target per day");
+        const diffEl = cellInput(tr, "Diff");
+        if (diffEl) {
+          diffEl.value = qty - target;
+          updateOriginalIndicator(diffEl);
+        }
+      }
+
+      // Revert a single cell back to its original value, and update anything
+      // that depends on it (Qty -> Morning/Afternoon sync + their indicators;
+      // Qty/Target -> Diff, since Diff = Qty - Target; Table No. -> also
+      // reverts this row's own Morning/Afternoon, since those were only set
+      // to their current values because of the Table No. that's now being
+      // undone, then refreshes the whole group's Qty/Diff).
+      function revertCell(input) {
+        input.value = input.dataset.original ?? "";
+        updateOriginalIndicator(input);
+
+        const col = input.closest("td")?.getAttribute("data-col");
+        const tr = input.closest("tr");
+
+        if (col === "Cut Plan Qty") {
+          syncRowShiftFromQty(tr);
+          const morningEl = cellInput(tr, "Cut Plan Morning");
+          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+          if (morningEl) updateOriginalIndicator(morningEl);
+          if (afternoonEl) updateOriginalIndicator(afternoonEl);
+        }
+        if (col === "Cut Plan Qty" || col === "Sewing target per day") {
+          recalcRowDiff(tr);
+        }
+        if (col === "Table No.") {
+          const morningEl = cellInput(tr, "Cut Plan Morning");
+          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+          if (morningEl) { morningEl.value = morningEl.dataset.original ?? ""; updateOriginalIndicator(morningEl); }
+          if (afternoonEl) { afternoonEl.value = afternoonEl.dataset.original ?? ""; updateOriginalIndicator(afternoonEl); }
+          recalcGroupQtyDiff(tr);
+        }
+        if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
+          // recalcGroupQtyDiff sums every row's CURRENT Morning + Afternoon in
+          // this group. If this was the only outstanding edit, that naturally
+          // brings Qty/Diff back to their original totals; if other edits are
+          // still present elsewhere in the group, it recalculates against
+          // whatever's still there rather than forcing a full revert.
+          recalcGroupQtyDiff(tr);
+        }
+      }
+
+      // ---- Requirement: editing a row's Cut Plan Qty updates that same
+      // row's Morning/Afternoon (whichever shift is currently active for it). ----
+      function assignQtyToShift(tr, qty) {
+        const morningEl = cellInput(tr, "Cut Plan Morning");
+        const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+        const hadMorning = numVal(tr, "Cut Plan Morning") > 0;
+        const hadAfternoon = numVal(tr, "Cut Plan Afternoon") > 0;
+
+        if (hadMorning && !hadAfternoon) {
+          if (morningEl) morningEl.value = qty;
+        } else if (hadAfternoon && !hadMorning) {
+          if (afternoonEl) afternoonEl.value = qty;
+        } else {
+          // Both zero (e.g. a brand-new row) or ambiguous (both set) - default
+          // to the shift this run is currently planning for.
+          if (CURRENT_SHIFT === "Morning") {
+            if (morningEl) morningEl.value = qty;
+            if (afternoonEl) afternoonEl.value = 0;
+          } else {
+            if (afternoonEl) afternoonEl.value = qty;
+            if (morningEl) morningEl.value = 0;
+          }
+        }
+        if (morningEl) updateOriginalIndicator(morningEl);
+        if (afternoonEl) updateOriginalIndicator(afternoonEl);
+      }
+
+      function syncRowShiftFromQty(tr) {
+        assignQtyToShift(tr, numVal(tr, "Cut Plan Qty"));
+      }
+
+      // Recompute Cut Plan Qty / Diff for every row sharing the same Sewing
+      // Line + JobCut - Suffix + Mark Type as tr, from their current
+      // Morning + Afternoon values - used after a Table No. lookup changes
+      // one row's quantity, so the shared group total stays correct.
+      function recalcGroupQtyDiff(tr) {
+        const sewingLine = strVal(tr, "Sewing Line");
+        const jobcutSuffix = strVal(tr, "JobCut - Suffix");
+        const markType = strVal(tr, "Mark Type");
+        const target = numVal(tr, "Sewing target per day");
+        const ownTbody = tr.closest("tbody");
+
+        const groupRows = Array.from(ownTbody.querySelectorAll("tr")).filter((r) =>
+          strVal(r, "Sewing Line") === sewingLine &&
+          strVal(r, "JobCut - Suffix") === jobcutSuffix &&
+          strVal(r, "Mark Type") === markType
+        );
+
+        const total = groupRows.reduce(
+          (sum, r) => sum + numVal(r, "Cut Plan Morning") + numVal(r, "Cut Plan Afternoon"), 0
+        );
+        const diff = total - target;
+
+        groupRows.forEach((r) => {
+          const qtyEl = cellInput(r, "Cut Plan Qty");
+          const diffEl = cellInput(r, "Diff");
+          if (qtyEl) { qtyEl.value = total; updateOriginalIndicator(qtyEl); }
+          if (diffEl) { diffEl.value = diff; updateOriginalIndicator(diffEl); }
+        });
+      }
+
+      // ---- Requirement: editing a row's Table No. looks up that specific
+      // table's real quantity from the source data and applies it, instead
+      // of keeping the previous table's leftover quantity. ----
+      async function lookupTableQty(sewingLine, jobcutSuffix, markType, tableNo) {
+        const resp = await fetch(`/lookup-table-qty/${JOB_ID}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sewing_line: sewingLine, jobcut_suffix: jobcutSuffix,
+            mark_type: markType, table_no: tableNo,
+          }),
+        });
+        if (!resp.ok) {
+          const errBody = await resp.json().catch(() => ({}));
+          throw new Error(errBody.error || `Server returned ${resp.status}`);
+        }
+        const data = await resp.json();
+        return data.qty;
+      }
+
+      function collectAllRows() {
+        const rows = [];
+        allTbodies.forEach((tb) => {
+          Array.from(tb.querySelectorAll("tr")).forEach((tr) => {
+            const row = {};
+            COLUMNS.forEach((col) => { row[col] = strVal(tr, col); });
+            rows.push(row);
+          });
+        });
+        return rows;
+      }
+
+      async function recalcFromServer() {
+        statusEl.textContent = "Recalculating…";
+        statusEl.className = "status";
+
+        const rows = collectAllRows();
+
+        try {
+          const resp = await fetch(`/recalc-cut-plan/${JOB_ID}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows }),
+          });
+          if (!resp.ok) {
+            const errBody = await resp.json().catch(() => ({}));
+            throw new Error(errBody.error || `Server returned ${resp.status}`);
+          }
+          const data2 = await resp.json();
+          renderAllBuildings(data2.rows);
+          statusEl.textContent = "Plan updated.";
+        } catch (err) {
+          statusEl.textContent = `Error: ${err.message}`;
+          statusEl.className = "status error";
+        }
+      }
+
+      // ---- Wire up per-tbody interactions (each building's table gets its
+      // own listeners; the actions that must span BOTH buildings - saving,
+      // and the full recalc - are wired separately below). ----
+      allTbodies.forEach((tb) => {
+        tb.addEventListener("change", async (e) => {
+          const col = e.target.closest("td")?.getAttribute("data-col");
+          if (col !== "Table No.") return;
+
+          const tr = e.target.closest("tr");
+          const sewingLine = strVal(tr, "Sewing Line");
+          const jobcutSuffix = strVal(tr, "JobCut - Suffix");
+          const markType = strVal(tr, "Mark Type");
+          const tableNo = strVal(tr, "Table No.");
+
+          statusEl.textContent = "Looking up table…";
+          statusEl.className = "status";
+
+          try {
+            const qty = await lookupTableQty(sewingLine, jobcutSuffix, markType, tableNo);
+            assignQtyToShift(tr, qty);
+            recalcGroupQtyDiff(tr);
+            statusEl.textContent = "Table quantity updated.";
+          } catch (err) {
+            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.className = "status error";
+          }
+        });
+
+        // Recalculate table selection once the user finishes editing Qty or
+        // Target (fires on blur-after-change, not on every keystroke). Table
+        // No. edits are handled separately above (lookupTableQty), NOT by the
+        // full re-selection here - re-running the greedy smallest-Table-ID
+        // selection would just re-pick the table it normally would and ignore
+        // whatever Table No. the user actually typed.
+        tb.addEventListener("change", (e) => {
+          const col = e.target.closest("td")?.getAttribute("data-col");
+          if (RECALC_TRIGGER_COLS.includes(col)) {
+            recalcFromServer();
+          }
+        });
+
+        // Prevent clicking the remove/revert buttons from blurring whatever
+        // cell is currently focused - a blur fires "change", which would
+        // trigger a server recalculation that races with (and can overwrite)
+        // the revert/remove action below. preventDefault() on mousedown stops
+        // the focus change before it happens.
+        tb.addEventListener("mousedown", (e) => {
+          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss")) {
+            e.preventDefault();
+          }
+        });
+
+        tb.addEventListener("click", (e) => {
+          if (e.target.closest(".decoration-flag-dismiss")) {
+            e.target.closest(".decoration-flag")?.remove();
+            return;
+          }
+          if (e.target.closest(".remove-btn")) {
+            e.target.closest("tr").remove();
+            updateRowCount(tb);
+            return;
+          }
+          if (e.target.closest(".revert-btn")) {
+            const td = e.target.closest("td");
+            const input = td ? td.querySelector("input") : null;
+            if (input) revertCell(input);
+          }
+        });
+
+        // Live sync: Qty -> Morning/Afternoon, as the user types. Also
+        // show/hide the "Original: X" indicator for whatever field was
+        // edited.
+        tb.addEventListener("input", (e) => {
+          if (e.target.tagName !== "INPUT") return;
+          const col = e.target.closest("td")?.getAttribute("data-col");
+
+          updateOriginalIndicator(e.target);
+
+          if (col === "Cut Plan Qty") {
+            syncRowShiftFromQty(e.target.closest("tr"));
+            const tr = e.target.closest("tr");
+            const morningEl = cellInput(tr, "Cut Plan Morning");
+            const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+            if (morningEl) updateOriginalIndicator(morningEl);
+            if (afternoonEl) updateOriginalIndicator(afternoonEl);
+          }
+
+          if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
+            recalcGroupQtyDiff(e.target.closest("tr"));
+          }
+        });
+      });
+
+      // Each building has its own "+ Add row" button, adding a blank row to
+      // its own table only.
+      document.querySelectorAll(".cutplan-add-row-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const tb = getTbody(btn.dataset.building);
+          if (!tb) return;
+          tb.appendChild(buildRow(null, "group-b"));
+          updateRowCount(tb);
+        });
+      });
+
+      // Save is a single, page-level action: gather rows from BOTH
+      // buildings' tables together and save them as one workbook (with
+      // separate sheets per building, handled server-side).
+      const saveBtn = document.getElementById("cutplan-save-btn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", async () => {
+          statusEl.textContent = "Saving…";
+          statusEl.className = "status";
+
+          const rows = collectAllRows();
+
+          try {
+            const resp = await fetch(`/update-cut-plan/${JOB_ID}`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ rows }),
+            });
+            if (!resp.ok) {
+              const errBody = await resp.json().catch(() => ({}));
+              throw new Error(errBody.error || `Server returned ${resp.status}`);
+            }
+            const data = await resp.json();
+            const files = data.files || [];
+
+            // Each building is its own downloadable file. Trigger them one
+            // at a time with a small stagger - some browsers block several
+            // simultaneous auto-downloads from the same click if fired all
+            // at once.
+            files.forEach((f, i) => {
+              setTimeout(() => {
+                const a = document.createElement("a");
+                a.href = f.url;
+                a.download = f.filename;
+                document.body.appendChild(a);
+                a.click();
+                a.remove();
+              }, i * 400);
+            });
+
+            const names = files.map((f) => f.filename).join(", ");
+            statusEl.textContent = files.length
+              ? `Saved. Downloading: ${names}`
+              : "Saved (nothing to download - both buildings are empty).";
+          } catch (err) {
+            statusEl.textContent = `Error: ${err.message}`;
+            statusEl.className = "status error";
+          }
+        });
+      }
+
+      // Dismissible flag/notice - purely client-side, just hides the banner.
+      const dismissFlagBtn = document.getElementById("dismiss-flag-btn");
+      if (dismissFlagBtn) {
+        dismissFlagBtn.addEventListener("click", () => {
+          document.getElementById("partial-plan-flag")?.remove();
+        });
+      }
+
+      // Capture the true baseline exactly once, from the freshly-generated
+      // rows already sitting in the DOM at this point.
+      captureInitialBaseline();
+    })();
+
+    // Live clock, driven by the visitor's own device clock (updates every second).
+    const WEEKDAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+    const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+    const pad = (n) => String(n).padStart(2, "0");
+
+    function tickClock() {
+      const now = new Date();
+      const dateEl = document.getElementById("clock-date");
+      const timeEl = document.getElementById("clock-time");
+      if (dateEl) dateEl.textContent = `${WEEKDAYS[now.getDay()]}, ${pad(now.getDate())} ${MONTHS[now.getMonth()]} ${now.getFullYear()}`;
+      if (timeEl) timeEl.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    }
+
+    tickClock();
+    setInterval(tickClock, 1000);
+  </script>
+</body>
+</html>
