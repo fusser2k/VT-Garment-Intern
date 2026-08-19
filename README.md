@@ -332,27 +332,19 @@ Prints a preview of the extracted data and which (if any) fields were missing.
 
 ## Running on your local network (accessible from other devices/computers)
 
-By default the server only answers on `127.0.0.1`, meaning only the same
-computer can open it. To let other devices on the same office/home network
-(e.g. a planner's laptop, a shop-floor tablet) reach it too:
+The server already binds to `0.0.0.0` by default (see the note on Railway
+deployment below for why), so any device on the same network can already
+reach it once you know this computer's address:
 
-1. Open `app.py` and find the last line:
-   ```python
-   app.run(host="127.0.0.1", port=5001, debug=True)
-   ```
-   Change `host="127.0.0.1"` to `host="0.0.0.0"`:
-   ```python
-   app.run(host="0.0.0.0", port=5001, debug=True)
-   ```
-2. Find this computer's local network IP address:
+1. Find this computer's local network IP address:
    - **Windows:** open Command Prompt, run `ipconfig`, look for "IPv4 Address" (e.g. `192.168.1.42`)
    - **macOS:** System Settings → Network → Wi-Fi/Ethernet → look for the IP address, or run `ipconfig getifaddr en0` in Terminal
    - **Linux:** run `hostname -I` or `ip addr` in a terminal
-3. Run the server as usual:
+2. Run the server as usual:
    ```bash
    python app.py
    ```
-4. From another device **on the same network**, open a browser and go to:
+3. From another device **on the same network**, open a browser and go to:
    ```
    http://<that-ip-address>:5001
    ```
@@ -364,6 +356,45 @@ this on a public or shared Wi-Fi network, and don't expose it to the open
 internet without adding proper authentication first. Also turn `debug=True`
 off (`debug=False`) once you're not actively developing — debug mode exposes
 a code-execution console if something crashes.
+
+## Deploying to Railway (or a similar host)
+
+`app.py` and `requirements.txt` are already set up for this:
+
+- `app.py`'s startup reads the `PORT` environment variable Railway assigns
+  (falling back to `5001` locally) and always binds `0.0.0.0` — the two
+  things a hardcoded `127.0.0.1`/fixed-port setup gets wrong, which is what
+  causes Railway's **"Application failed to respond"** error.
+- A `Procfile` in the project root tells Railway exactly how to start the
+  app with `gunicorn` (a production-grade server) instead of Flask's own
+  dev server:
+  ```
+  web: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 120
+  ```
+- `gunicorn` is included in `requirements.txt`.
+
+**If you still see "Application failed to respond" after this:** open the
+**Deployments** tab in Railway, click the failed deployment, and check
+**Deploy Logs** — it shows the actual Python exception (missing dependency,
+import error, etc.) rather than just the generic error page.
+
+**Important: keep `--workers 1`.** This app keeps each browser's Tab 1/2/3
+data in an in-memory `SESSIONS` dict (see `app.py`) — that memory is *not*
+shared between separate worker processes. Running with more than one worker
+would randomly show a different (or empty) session depending on which
+worker handled a given request. If you need more concurrency, increase
+`--threads` instead of `--workers`.
+
+**The filesystem (and `SESSIONS`) is reset on every redeploy.** Uploaded
+files, generated Excel files, and — notably — the persistent
+`data/allocation_memory.json` (Tab 3's cross-session shift-carryover memory,
+see above) all live on Railway's container filesystem, which persists
+between requests but is wiped clean on every new deploy/restart. For
+continuous day-to-day use between deploys this is fine; just be aware a
+redeploy resets the "which tables were already planned" memory too. If that
+matters for your use case, that file would need to move to a real database
+or a mounted volume — not set up here, since the original request was for a
+local tool.
 
 ## Extending Tab 3 to also use the WIP file, once its template is known
 

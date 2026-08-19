@@ -468,7 +468,12 @@ def download_cutplan_file(job_id, building_key):
 
 
 if __name__ == "__main__":
-    # host="127.0.0.1" -> only this machine can reach it.
-    # For local-NETWORK access (other devices on the same LAN), see README.md
-    # for how to switch this to host="0.0.0.0".
-    app.run(host="127.0.0.1", port=5001, debug=True)
+    # Railway (and most hosting platforms) assign their own port via the
+    # PORT environment variable, and require the app to listen on 0.0.0.0
+    # (not 127.0.0.1, which only accepts connections from the same
+    # machine - that's why a hardcoded 127.0.0.1 causes "Application
+    # failed to respond" on Railway). Locally this still defaults to port
+    # 5001 exactly as before if PORT isn't set.
+    port = int(os.environ.get("PORT", 5001))
+    debug_mode = os.environ.get("FLASK_DEBUG", "1") == "1"
+    app.run(host="0.0.0.0", port=port, debug=debug_mode)
