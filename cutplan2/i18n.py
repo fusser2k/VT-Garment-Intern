@@ -18,7 +18,7 @@ DEFAULT_LANG = "en"
 SUPPORTED_LANGS = ["en", "th"]
 
 TRANSLATIONS = {
-    "app_title": {"en": "Cut Planning Model v2", "th": "โมเดลวางแผนการตัด v2"},
+    "app_title": {"en": "Cut Planning Model", "th": "โมเดลวางแผนการตัด"},
 
     # ---- Tabs ----
     "tab1_label": {"en": "Tab 1: Buffer Cutting Order Form", "th": "แท็บ 1: ใบสั่งตัดบัฟเฟอร์"},
@@ -39,8 +39,8 @@ TRANSLATIONS = {
               "หากไฟล์ขาดข้อมูลในช่องใดช่องหนึ่งจาก 14 ช่อง ช่องนั้นจะถูกปล่อยว่างในผลลัพธ์ที่ดึงออกมา",
     },
     "tab1_file_label": {"en": "Buffer Cutting Order Form (.xlsx)", "th": "ไฟล์ใบสั่งตัดบัฟเฟอร์ (.xlsx)"},
-    "use_sample_data": {"en": "Use bundled sample data instead", "th": "ใช้ข้อมูลตัวอย่างที่แนบมาแทน"},
-    "use_sample_wip_data": {"en": "Use bundled sample WIP data instead", "th": "ใช้ข้อมูล WIP ตัวอย่างที่แนบมาแทน"},
+    "use_sample_data": {"en": "Use sample data", "th": "ใช้ข้อมูลตัวอย่าง"},
+    "use_sample_wip_data": {"en": "Use sample data", "th": "ใช้ข้อมูลตัวอย่าง"},
     "extract_data_btn": {"en": "Extract data", "th": "ดึงข้อมูล"},
     "target_fields_label": {"en": "Target fields (extracted in this order):", "th": "ช่องข้อมูลเป้าหมาย (เรียงตามลำดับที่ดึง):"},
     "fields_not_found": {
