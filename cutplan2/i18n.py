@@ -187,6 +187,18 @@ TRANSLATIONS = {
         "en": "Please choose whether you're planning for Morning or Afternoon.",
         "th": "กรุณาเลือกว่าคุณกำลังวางแผนสำหรับกะเช้าหรือกะบ่าย",
     },
+    "reset_memory_btn": {"en": "Reset planning memory", "th": "ล้างความจำการวางแผน"},
+    "reset_memory_hint": {
+        "en": "Clears the record of which tables were already planned before, so every table is "
+              "treated as brand new on the next \"Generate cut plan\". Use this if you're testing "
+              "repeatedly with the same file and don't want carry-over to kick in.",
+        "th": "ล้างประวัติว่าโต๊ะใดเคยถูกวางแผนไปแล้ว ทำให้โต๊ะทุกตัวถูกมองว่าเป็นข้อมูลใหม่ในการ \"สร้างแผนการตัด\" ครั้งถัดไป "
+              "ใช้ตัวเลือกนี้หากคุณกำลังทดสอบด้วยไฟล์เดิมซ้ำๆ และไม่ต้องการให้ระบบ carry-over ทำงาน",
+    },
+    "reset_memory_confirm": {
+        "en": "Planning memory has been reset. The next \"Generate cut plan\" will treat every table as brand new.",
+        "th": "ล้างความจำการวางแผนแล้ว การ \"สร้างแผนการตัด\" ครั้งถัดไปจะมองว่าโต๊ะทุกตัวเป็นข้อมูลใหม่",
+    },
 
     # ---- JS status strings ----
     "js_saving": {"en": "Saving\u2026", "th": "กำลังบันทึก\u2026"},

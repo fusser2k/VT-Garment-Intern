@@ -54,6 +54,9 @@
   .shift-choice-row { display: flex; gap: 24px; margin-bottom: 16px; }
   .shift-choice-option { font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer; }
   .shift-choice-hint { color: #777; font-size: 12px; font-weight: normal; }
+  .reset-memory-row { margin-top: 4px; }
+  .btn-link { background: none; border: none; color: #777; font-size: 12px; text-decoration: underline; cursor: pointer; padding: 4px 0; }
+  .btn-link:hover { color: #1F4E78; background: none; }
   .edit-note { color: #555; font-size: 13px; background: #f6f8fa; padding: 10px 16px; border-radius: 6px; margin-bottom: 14px; }
   .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .btn { border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; }
@@ -379,6 +382,10 @@
         </label>
       </div>
       <button type="submit">{{ t('generate_cut_plan_btn') }}</button>
+    </form>
+
+    <form action="{{ url_for('reset_allocation_memory') }}" method="post" class="reset-memory-row">
+      <button type="submit" class="btn-link" title="{{ t('reset_memory_hint') }}">{{ t('reset_memory_btn') }}</button>
     </form>
 
     {% if cutplan %}

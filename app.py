@@ -501,6 +501,20 @@ def download_cutplan_file(job_id, building_key):
     return send_file(output_path, as_attachment=True, download_name=download_name)
 
 
+@app.route("/reset-allocation-memory", methods=["POST"])
+def reset_allocation_memory():
+    """Clear the persistent record of which tables were already planned
+    before (data/allocation_memory.json), so the next "Generate cut plan"
+    treats every table as brand new. Mainly useful when testing repeatedly
+    with the SAME input file, whose Status values never actually change
+    between runs - without a reset, every table looks "still incomplete"
+    every time, so carry-over triggers on every single row."""
+    if os.path.exists(ALLOCATION_MEMORY_PATH):
+        os.remove(ALLOCATION_MEMORY_PATH)
+    flash(translate("reset_memory_confirm", _get_lang()))
+    return redirect(url_for("index", tab=3))
+
+
 if __name__ == "__main__":
     # Railway (and most hosting platforms) assign their own port via the
     # PORT environment variable, and require the app to listen on 0.0.0.0

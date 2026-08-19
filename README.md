@@ -212,6 +212,16 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    by both the initial generation and any later recalculation (e.g. raising
    a target pulls in a table that turns out to have been planned before —
    it goes through the same check).
+
+   **Testing note:** this only distinguishes a table as "still incomplete"
+   based on Tab 1's Status field. If you keep re-uploading the *same* file
+   without ever changing any Status values, every table will look
+   "still incomplete" on every run, so carry-over will trigger every single
+   time — that's expected, not a bug. A small **"Reset planning memory"**
+   button on Tab 3 (next to "Generate cut plan") clears
+   `data/allocation_memory.json`, so the next generation treats every table
+   as brand new again — useful when testing repeatedly with an unchanged
+   file.
 6. **Note always starts blank, for every table — new or carried over.** The
    model never writes anything into it automatically; it's reserved
    entirely for the user's own manual comments, added on the
