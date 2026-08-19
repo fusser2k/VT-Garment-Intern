@@ -370,11 +370,11 @@
       <label>{{ t('shift_choice_question') }}</label>
       <div class="shift-choice-row">
         <label class="shift-choice-option">
-          <input type="radio" name="shift_choice" value="Morning" checked>
+          <input type="radio" name="shift_choice" value="Morning" {{ 'checked' if not (cutplan and cutplan.run_info.shift_choice == 'Afternoon') }}>
           {{ t('shift_morning') }} <span class="shift-choice-hint">{{ t('shift_morning_hint') }}</span>
         </label>
         <label class="shift-choice-option">
-          <input type="radio" name="shift_choice" value="Afternoon">
+          <input type="radio" name="shift_choice" value="Afternoon" {{ 'checked' if (cutplan and cutplan.run_info.shift_choice == 'Afternoon') }}>
           {{ t('shift_afternoon') }} <span class="shift-choice-hint">{{ t('shift_afternoon_hint') }}</span>
         </label>
       </div>

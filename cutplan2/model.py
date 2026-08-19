@@ -905,6 +905,12 @@ def build_cut_plan(
         "run_datetime": run_datetime or datetime.now(),
         "shift_label": shift_label,
         "plan_date": plan_date,
+        # The user's ORIGINAL choice ("Morning"/"Afternoon"), as opposed to
+        # shift_label (which is the OPPOSITE - where the quantity actually
+        # landed). Kept so the web UI can re-select the same radio button
+        # the user picked, instead of always resetting to "Morning" after
+        # the page reloads with results.
+        "shift_choice": shift_choice if shift_choice in ("Morning", "Afternoon") else None,
     }
     return plan_df, run_info
 
