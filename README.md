@@ -107,15 +107,18 @@ from the old model, so both can run at once). Open that URL in your browser
 
 - **Tab 1: Buffer Cutting Order Form** — upload your input `.xlsx` (or check
   "use bundled sample data") and click **Extract data**. The extracted table
-  appears right below the form, with a **Download Excel** button.
+  appears right below the form, with a **search box** above it (matches
+  against any column) and a **Download Excel** button.
 - **Tab 2: WIP Upload** — upload a WIP `.xlsx` file (or check "use bundled
   sample WIP data"). It's extracted into a fixed set of fields (see below)
-  with a **Download Excel** button, or falls back to a raw, unmapped
-  preview if the file doesn't match the known template.
+  with the same **search box** and a **Download Excel** button, or falls
+  back to a raw, unmapped preview if the file doesn't match the known
+  template.
 - **Tab 3: Cut Plan** — click **Generate cut plan** (uses Tab 1's extracted
   data, so run Tab 1 first). The plan is shown as an **editable table** —
-  adjust any cell, add/remove rows — then **Save changes & Download Excel**
-  saves your edits and downloads one Excel file per building.
+  adjust any cell, add/remove rows, **filter by any column** — then
+  **Save changes & Download Excel** saves your edits and downloads one
+  Excel file per building.
 
 Results from each tab are kept in memory (per-browser session) as you
 navigate between tabs, so uploading on one tab doesn't clear what's on
@@ -330,10 +333,35 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   quantity already reaches the target. Any Notes already typed on tables
   that stay selected are preserved, and each table's "Original" comparison
   value stays pinned to its true baseline throughout.
-- **+ Add row** adds a blank row (e.g. to plan one more table by hand).
-  Manually added rows (a Table No. that isn't one of the real candidate
-  tables) are always kept as-is and don't get dropped by recalculation.
+- **+ Add row** adds a blank row **at the top** of that building's table —
+  easy to find without scrolling. Fill in its Sewing Line, JobCut - Suffix,
+  Mark Type, and Table No. (in that order, tabbing through as normal), and
+  once you finish editing **Table No.**, the row automatically relocates to
+  its correct sorted position within the matching group, exactly as if it
+  had been part of the original plan. Manually added rows (a Table No. that
+  isn't one of the real candidate tables) are always kept as-is and don't
+  get dropped by recalculation. Editing Table No. on an existing row
+  relocates it the same way.
+- **Hover over any row to reveal a small ✚ button** (next to the ✕) that
+  inserts a blank row directly below it — handy when you want to start
+  filling in a new table right next to a specific one you're already
+  looking at, instead of scrolling to the top. It relocates the same way
+  as above once you fill in its Table No.
 - **✕** next to a row removes it.
+- **Each column has an Excel-style filter dropdown**, right under the
+  headers — click **Filter ▾** to see every unique value currently in that
+  column (with a count for each), check/uncheck individual values, or use
+  **Select All** / **Clear All**. Multiple columns' filters combine with AND
+  (a row must match every active filter). The button highlights blue while
+  a filter is active on that column. **Filtering is purely visual** —
+  filtered-out rows stay fully part of the data; editing, recalculating,
+  and Save changes & Download Excel always work against the complete table
+  regardless of what's currently filtered. The building's **Clear filters**
+  button resets every column's filter at once. Filters stay in effect
+  through recalculation and adding rows (a freshly rebuilt table re-applies
+  whatever's currently selected); the unique-values list itself is
+  recomputed fresh every time you open a dropdown, so it always reflects
+  what's currently in the table.
 - Nothing is saved until you click **Save changes & Download Excel** — this
   regenerates the workbook with your edits and downloads it. The workbook's
   title row is stamped "Manually edited on …" once you've saved edits, so

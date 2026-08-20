@@ -65,6 +65,26 @@
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: center; }
   th { background: #1F4E78; color: #fff; position: sticky; top: 0; z-index: 1; }
+  tr.filter-row th { background: #eef3f9; padding: 3px 4px; }
+  .col-filter-btn { width: 100%; box-sizing: border-box; border: 1px solid #cfe0f0; border-radius: 3px; padding: 4px 6px; font-size: 12px; font-weight: normal; color: #333; background: #fff; cursor: pointer; text-align: left; }
+  .col-filter-btn:hover { border-color: #1F4E78; }
+  .col-filter-btn.filter-active { border-color: #1F4E78; background: #eaf1fb; color: #1F4E78; font-weight: bold; }
+  .col-filter-dropdown { position: fixed; background: #fff; border: 1px solid #b7c9dc; border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.18); z-index: 500; width: 220px; font-size: 13px; }
+  .col-filter-actions { display: flex; gap: 6px; padding: 8px; border-bottom: 1px solid #eee; }
+  .col-filter-actions button { flex: 1; background: #f6f8fa; border: 1px solid #cfe0f0; border-radius: 4px; padding: 5px 6px; font-size: 12px; color: #1F4E78; cursor: pointer; }
+  .col-filter-actions button:hover { background: #eaf1fb; }
+  .col-filter-list { max-height: 240px; overflow-y: auto; padding: 4px 0; }
+  .col-filter-item { display: flex; align-items: center; gap: 6px; padding: 4px 10px; cursor: pointer; }
+  .col-filter-item:hover { background: #f6f8fa; }
+  .col-filter-item label { flex: 1; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .col-filter-item .count { color: #999; font-size: 11px; }
+  .col-filter-empty { padding: 10px; color: #999; text-align: center; }
+  .filtered-count { color: #b3261e; font-style: italic; margin-left: 6px; }
+  .btn-link-small { background: none; border: none; color: #1F4E78; font-size: 13px; text-decoration: underline; cursor: pointer; padding: 4px 8px; }
+  .btn-link-small:hover { color: #163a58; background: none; }
+  .global-search-row { margin-bottom: 10px; }
+  .global-search-input { width: 100%; max-width: 420px; box-sizing: border-box; border: 1px solid #cfe0f0; border-radius: 6px; padding: 8px 12px; font-size: 14px; }
+  .global-search-input:focus { border-color: #1F4E78; outline: none; }
   tr:nth-child(even) { background: #f6f8fa; }
   tr.group-a { background: #DCE6F1; }
   tr.group-b { background: #ffffff; }
@@ -90,6 +110,13 @@
   .swap-shift-btn:hover { background: #eef3f9; border-color: #1F4E78; }
   .remove-btn { background: none; border: none; color: #b3261e; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; }
   .remove-btn:hover { text-decoration: underline; }
+  .insert-row-below-btn {
+    background: none; border: 1px solid #cfe0f0; border-radius: 3px; color: #1F4E78;
+    cursor: pointer; font-size: 13px; line-height: 1; padding: 2px 6px; margin-right: 4px;
+    opacity: 0; transition: opacity 0.12s ease-in-out;
+  }
+  tr:hover .insert-row-below-btn, .insert-row-below-btn:focus { opacity: 1; }
+  .insert-row-below-btn:hover { background: #eef3f9; border-color: #1F4E78; }
   .table-wrap { max-height: 60vh; overflow: auto; border: 1px solid #ddd; border-radius: 6px; }
   .empty { color: #555; padding: 20px; }
   .status-Pending { color: #b36b00; font-weight: bold; }
@@ -178,6 +205,9 @@
       </div>
 
       {% if extraction.rows %}
+      <div class="global-search-row">
+        <input type="text" class="global-search-input" id="extraction-search" placeholder="{{ t('search_placeholder') }}">
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -187,7 +217,7 @@
               {% endfor %}
             </tr>
           </thead>
-          <tbody>
+          <tbody id="extraction-tbody">
             {% for row in extraction.rows %}
               <tr>
                 {% for col in extraction.columns %}
@@ -252,6 +282,9 @@
       </div>
 
       {% if wip.rows %}
+      <div class="global-search-row">
+        <input type="text" class="global-search-input" id="wip-search" placeholder="{{ t('search_placeholder') }}">
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -261,7 +294,7 @@
               {% endfor %}
             </tr>
           </thead>
-          <tbody>
+          <tbody id="wip-tbody">
             {% for row in wip.rows %}
               <tr>
                 {% for col in wip.columns %}
@@ -309,7 +342,7 @@
               {% if row['_multi_decoration'] and not is_cont %}
                 <div class="decoration-flag" title="{{ t('decoration_flag_title') }}">
                   <span class="decoration-flag-text">{{ t('decoration_flag_text') }}</span>
-                  <button type="button" class="decoration-flag-dismiss" title="{{ t('js_dismiss_flag') }}">&#10005;</button>
+                  <button type="button" class="decoration-flag-dismiss" tabindex="-1" title="{{ t('js_dismiss_flag') }}">&#10005;</button>
                 </div>
               {% endif %}
               <div class="orig-value"></div>
@@ -320,7 +353,7 @@
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }} shift-qty-cell">
               <div class="shift-qty-row">
                 <input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}">
-                <button type="button" class="swap-shift-btn" title="{{ t('js_swap_shift') }}">&#8646;</button>
+                <button type="button" class="swap-shift-btn" tabindex="-1" title="{{ t('js_swap_shift') }}">&#8646;</button>
               </div>
               <div class="orig-value"></div>
             </td>
@@ -330,7 +363,10 @@
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
           {% endif %}
         {% endfor %}
-        <td class="action"><button type="button" class="remove-btn" title="{{ t('js_remove_row') }}">&#10005;</button></td>
+        <td class="action">
+          <button type="button" class="insert-row-below-btn" tabindex="-1" title="{{ t('js_insert_row_below') }}">&#43;</button>
+          <button type="button" class="remove-btn" tabindex="-1" title="{{ t('js_remove_row') }}">&#10005;</button>
+        </td>
       </tr>
     {% endfor %}
   {% endmacro %}
@@ -340,8 +376,10 @@
     <div class="actions">
       <div class="run-info">
         <span id="cutplan-row-count-{{ building_key }}">{{ building_data.row_count }}</span> {{ t('table_rows_planned') }}
+        <span class="filtered-count" id="cutplan-filtered-count-{{ building_key }}"></span>
       </div>
       <div class="toolbar">
+        <button type="button" class="btn btn-link-small cutplan-clear-filters-btn" data-building="{{ building_key }}">{{ t('clear_filters_btn') }}</button>
         <button type="button" class="btn btn-secondary cutplan-add-row-btn" data-building="{{ building_key }}">{{ t('add_row_btn') }}</button>
       </div>
     </div>
@@ -352,6 +390,14 @@
           <tr>
             {% for col in cutplan.columns %}
               <th>{{ col_label(col) }}</th>
+            {% endfor %}
+            <th></th>
+          </tr>
+          <tr class="filter-row" data-building="{{ building_key }}">
+            {% for col in cutplan.columns %}
+              <th>
+                <button type="button" class="col-filter-btn" data-building="{{ building_key }}" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
+              </th>
             {% endfor %}
             <th></th>
           </tr>
@@ -385,7 +431,7 @@
         <div class="flag-notice-text">
           <strong>{{ t('flag_notice_title') }}</strong> {{ t('flag_notice_text') }}
         </div>
-        <button type="button" class="flag-dismiss-btn" id="dismiss-flag-btn" title="{{ t('js_dismiss_notice') }}">&#10005;</button>
+        <button type="button" class="flag-dismiss-btn" id="dismiss-flag-btn" tabindex="-1" title="{{ t('js_dismiss_notice') }}">&#10005;</button>
       </div>
 
       <div class="edit-note">
@@ -426,6 +472,24 @@
         document.getElementById(`tab-panel-${target}`).classList.add("active");
       });
     });
+
+    // ---- Simple global search for Tab 1 / Tab 2's read-only tables: hides
+    // rows where NO cell's text matches the typed search (case-insensitive
+    // substring), across every column at once. ----
+    function wireGlobalSearch(inputId, tbodyId) {
+      const input = document.getElementById(inputId);
+      const tbody = document.getElementById(tbodyId);
+      if (!input || !tbody) return;
+      input.addEventListener("input", () => {
+        const needle = input.value.trim().toLowerCase();
+        Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
+          const matches = needle === "" || tr.textContent.toLowerCase().includes(needle);
+          tr.style.display = matches ? "" : "none";
+        });
+      });
+    }
+    wireGlobalSearch("extraction-search", "extraction-tbody");
+    wireGlobalSearch("wip-search", "wip-tbody");
 
     // ---- Tab 3: Cut Plan — editable tables (Building 1 / Building 2 / Unassigned) ----
     (function () {
@@ -507,7 +571,220 @@
           const total = allTbodies.reduce((sum, tb) => sum + tb.querySelectorAll("tr").length, 0);
           totalRowCountEl.textContent = total;
         }
+        // Filtering is a pure VIEW concern (row visibility only) - it never
+        // removes rows from the data collected for save/recalc. Re-apply
+        // whatever filters are currently typed in whenever rows change
+        // (add row, insert row, resort, or a full rebuild after
+        // recalculation), since freshly (re)built <tr> elements always
+        // start fully visible regardless of what was filtered before.
+        applyColumnFilters(buildingKey);
       }
+
+      // ---- Column filtering (Tab 3), Excel-style: click a column's Filter
+      // button to see every UNIQUE value currently in that column, with
+      // checkboxes to show/hide specific ones, plus Select All / Clear All.
+      // Purely visual (tr.style.display) - collectAllRows() always reads
+      // every row regardless of filter state, so filtering never affects
+      // what gets saved or recalculated.
+      //
+      // State: for each building+column, the set of values the user has
+      // UNCHECKED (excluded/hidden). Empty set = no filter active for that
+      // column (everything shown), matching a fresh, never-touched filter.
+      const COLUMN_FILTER_STATE = {}; // { [buildingKey]: { [col]: Set<string> } }
+
+      function getExcludedSet(buildingKey, col) {
+        if (!COLUMN_FILTER_STATE[buildingKey]) COLUMN_FILTER_STATE[buildingKey] = {};
+        if (!COLUMN_FILTER_STATE[buildingKey][col]) COLUMN_FILTER_STATE[buildingKey][col] = new Set();
+        return COLUMN_FILTER_STATE[buildingKey][col];
+      }
+
+      function getFilterRow(buildingKey) {
+        return document.querySelector(`tr.filter-row[data-building="${buildingKey}"]`);
+      }
+
+      function applyColumnFilters(buildingKey) {
+        const tbodyEl = getTbody(buildingKey);
+        if (!tbodyEl) return;
+
+        const state = COLUMN_FILTER_STATE[buildingKey] || {};
+        const activeCols = Object.keys(state).filter((col) => state[col] && state[col].size > 0);
+
+        const rows = Array.from(tbodyEl.querySelectorAll("tr"));
+        let shownCount = 0;
+        rows.forEach((tr) => {
+          const matches = activeCols.every((col) => !state[col].has(strVal(tr, col)));
+          tr.style.display = matches ? "" : "none";
+          if (matches) shownCount++;
+        });
+
+        const filteredCountEl = document.getElementById(`cutplan-filtered-count-${buildingKey}`);
+        if (filteredCountEl) {
+          filteredCountEl.textContent = activeCols.length > 0 ? `(${shownCount} ${T.rows_shown_of_total})` : "";
+        }
+
+        // Reflect active/inactive state on each column's Filter button.
+        const filterRow = getFilterRow(buildingKey);
+        if (filterRow) {
+          filterRow.querySelectorAll(".col-filter-btn").forEach((btn) => {
+            const col = btn.dataset.col;
+            btn.classList.toggle("filter-active", activeCols.includes(col));
+          });
+        }
+      }
+
+      function closeOpenFilterDropdown() {
+        document.querySelectorAll(".col-filter-dropdown").forEach((el) => el.remove());
+        document.removeEventListener("mousedown", handleOutsideDropdownClick, true);
+        window.removeEventListener("scroll", handleScrollWhileFilterOpen, true);
+      }
+
+      function handleOutsideDropdownClick(e) {
+        if (!e.target.closest(".col-filter-dropdown") && !e.target.closest(".col-filter-btn")) {
+          closeOpenFilterDropdown();
+        }
+      }
+
+      // Close the dropdown if the PAGE or the TABLE scrolls (which would
+      // leave the dropdown's fixed position no longer lined up with its
+      // trigger button) - but NOT if the scroll happened inside the
+      // dropdown's own checkbox list, since scroll events are captured from
+      // every scrollable ancestor down to window, including that list.
+      function handleScrollWhileFilterOpen(e) {
+        if (e.target && e.target.closest && e.target.closest(".col-filter-dropdown")) return;
+        closeOpenFilterDropdown();
+      }
+
+      function openFilterDropdown(buildingKey, col, triggerBtn) {
+        closeOpenFilterDropdown();
+
+        const tbodyEl = getTbody(buildingKey);
+        if (!tbodyEl) return;
+
+        // Collect unique values currently in this column, with counts, from
+        // EVERY row (computed fresh each time the dropdown opens, since
+        // rows can be added/removed/recalculated between opens).
+        const counts = new Map();
+        Array.from(tbodyEl.querySelectorAll("tr")).forEach((tr) => {
+          const v = strVal(tr, col);
+          counts.set(v, (counts.get(v) || 0) + 1);
+        });
+        const uniqueValues = Array.from(counts.keys()).sort((a, b) => {
+          const na = parseFloat(a), nb = parseFloat(b);
+          if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
+          return a.localeCompare(b);
+        });
+
+        const excluded = getExcludedSet(buildingKey, col);
+
+        const dropdown = document.createElement("div");
+        dropdown.className = "col-filter-dropdown";
+
+        const actions = document.createElement("div");
+        actions.className = "col-filter-actions";
+        const selectAllBtn = document.createElement("button");
+        selectAllBtn.type = "button";
+        selectAllBtn.textContent = T.filter_select_all;
+        const clearAllBtn = document.createElement("button");
+        clearAllBtn.type = "button";
+        clearAllBtn.textContent = T.filter_clear_all;
+        actions.appendChild(selectAllBtn);
+        actions.appendChild(clearAllBtn);
+        dropdown.appendChild(actions);
+
+        const list = document.createElement("div");
+        list.className = "col-filter-list";
+
+        if (uniqueValues.length === 0) {
+          const empty = document.createElement("div");
+          empty.className = "col-filter-empty";
+          empty.textContent = T.filter_no_values;
+          list.appendChild(empty);
+        } else {
+          uniqueValues.forEach((value, idx) => {
+            const item = document.createElement("div");
+            item.className = "col-filter-item";
+            const checkboxId = `colfilter-${buildingKey}-${col.replace(/[^a-zA-Z0-9]/g, "")}-${idx}`;
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.id = checkboxId;
+            checkbox.checked = !excluded.has(value);
+            checkbox.addEventListener("change", () => {
+              if (checkbox.checked) excluded.delete(value);
+              else excluded.add(value);
+              applyColumnFilters(buildingKey);
+            });
+            const label = document.createElement("label");
+            label.setAttribute("for", checkboxId);
+            label.textContent = value === "" ? T.filter_blank_value : value;
+            const count = document.createElement("span");
+            count.className = "count";
+            count.textContent = counts.get(value);
+            item.appendChild(checkbox);
+            item.appendChild(label);
+            item.appendChild(count);
+            list.appendChild(item);
+          });
+        }
+        dropdown.appendChild(list);
+
+        selectAllBtn.addEventListener("click", () => {
+          excluded.clear();
+          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
+          applyColumnFilters(buildingKey);
+        });
+        clearAllBtn.addEventListener("click", () => {
+          uniqueValues.forEach((v) => excluded.add(v));
+          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
+          applyColumnFilters(buildingKey);
+        });
+
+        document.body.appendChild(dropdown);
+
+        // Position below the trigger button, using viewport coordinates
+        // (position: fixed) so the dropdown is never clipped by the
+        // table's own scroll container.
+        const rect = triggerBtn.getBoundingClientRect();
+        const dropdownWidth = dropdown.offsetWidth || 220;
+        let left = rect.left;
+        if (left + dropdownWidth > window.innerWidth - 8) {
+          left = Math.max(8, window.innerWidth - dropdownWidth - 8);
+        }
+        dropdown.style.top = `${rect.bottom + 4}px`;
+        dropdown.style.left = `${left}px`;
+
+        // Close on an outside click, or if the table is scrolled (the
+        // dropdown's fixed position would no longer line up with the
+        // button once the table content moves underneath it).
+        setTimeout(() => document.addEventListener("mousedown", handleOutsideDropdownClick, true), 0);
+        window.addEventListener("scroll", handleScrollWhileFilterOpen, true);
+      }
+
+      document.querySelectorAll(".col-filter-btn").forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const buildingKey = btn.dataset.building;
+          const col = btn.dataset.col;
+          const alreadyOpenForThisBtn = document.querySelector(".col-filter-dropdown") && btn.classList.contains("filter-dropdown-owner");
+          document.querySelectorAll(".col-filter-btn").forEach((b) => b.classList.remove("filter-dropdown-owner"));
+          if (alreadyOpenForThisBtn) {
+            closeOpenFilterDropdown();
+          } else {
+            btn.classList.add("filter-dropdown-owner");
+            openFilterDropdown(buildingKey, col, btn);
+          }
+        });
+      });
+
+      document.querySelectorAll(".cutplan-clear-filters-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const buildingKey = btn.dataset.building;
+          if (COLUMN_FILTER_STATE[buildingKey]) {
+            Object.keys(COLUMN_FILTER_STATE[buildingKey]).forEach((col) => COLUMN_FILTER_STATE[buildingKey][col].clear());
+          }
+          closeOpenFilterDropdown();
+          applyColumnFilters(buildingKey);
+        });
+      });
 
       // Build one <tr>, populated from rowData if given (server response / rebuild),
       // or blank if rowData is null (the "+ Add row" case). contFlags (optional)
@@ -549,6 +826,7 @@
             const swapBtn = document.createElement("button");
             swapBtn.type = "button";
             swapBtn.className = "swap-shift-btn";
+            swapBtn.tabIndex = -1;
             swapBtn.title = T.swap_shift;
             swapBtn.innerHTML = "&#8646;";
             row.appendChild(swapBtn);
@@ -570,6 +848,7 @@
               const flagDismiss = document.createElement("button");
               flagDismiss.type = "button";
               flagDismiss.className = "decoration-flag-dismiss";
+              flagDismiss.tabIndex = -1;
               flagDismiss.title = T.dismiss_flag;
               flagDismiss.innerHTML = "&#10005;";
               flagDiv.appendChild(flagText);
@@ -592,9 +871,17 @@
         });
         const actionTd = document.createElement("td");
         actionTd.className = "action";
+        const insertBtn = document.createElement("button");
+        insertBtn.type = "button";
+        insertBtn.className = "insert-row-below-btn";
+        insertBtn.tabIndex = -1;
+        insertBtn.title = T.insert_row_below;
+        insertBtn.innerHTML = "&#43;";
+        actionTd.appendChild(insertBtn);
         const removeBtn = document.createElement("button");
         removeBtn.type = "button";
         removeBtn.className = "remove-btn";
+        removeBtn.tabIndex = -1;
         removeBtn.title = T.remove_row;
         removeBtn.innerHTML = "&#10005;";
         actionTd.appendChild(removeBtn);
@@ -665,6 +952,48 @@
         updateRowCount(tbodyEl);
       }
 
+      // Re-sort every row currently in one building's tbody by Sewing Line
+      // -> JobCut - Suffix -> Mark Type -> Table No. (same convention the
+      // server uses), then re-render. Used after "+ Add row" places a new
+      // row at the top for easy editing and the user fills in its identity
+      // (or edits an existing row's identity fields) - the row then moves
+      // to its correct group position automatically, instead of staying
+      // wherever it happened to be added.
+      function resortTbodyRows(tbodyEl) {
+        const rows = Array.from(tbodyEl.querySelectorAll("tr")).map((tr) => {
+          const row = {};
+          COLUMNS.forEach((col) => { row[col] = strVal(tr, col); });
+          return row;
+        });
+
+        const asNumber = (v) => {
+          const n = parseFloat(v);
+          return isNaN(n) ? null : n;
+        };
+
+        rows.sort((a, b) => {
+          const sl = String(a["Sewing Line"] ?? "").localeCompare(String(b["Sewing Line"] ?? ""));
+          if (sl !== 0) return sl;
+          const jc = String(a["JobCut - Suffix"] ?? "").localeCompare(String(b["JobCut - Suffix"] ?? ""));
+          if (jc !== 0) return jc;
+
+          const aMt = asNumber(a["Mark Type"]), bMt = asNumber(b["Mark Type"]);
+          if (aMt !== bMt) {
+            if (aMt === null) return 1;
+            if (bMt === null) return -1;
+            if (aMt !== bMt) return aMt - bMt;
+          }
+
+          const aTn = asNumber(a["Table No."]), bTn = asNumber(b["Table No."]);
+          if (aTn === null && bTn === null) return 0;
+          if (aTn === null) return 1;
+          if (bTn === null) return -1;
+          return aTn - bTn;
+        });
+
+        renderRowsIntoTbody(tbodyEl, rows);
+      }
+
       // Split a combined list of rows (e.g. a /recalc-cut-plan response) by
       // building, and re-render each building's own tbody. Each building's
       // merge/continuation grouping is computed independently, scoped to
@@ -709,6 +1038,7 @@
           const revertBtn = document.createElement("button");
           revertBtn.type = "button";
           revertBtn.className = "revert-btn";
+          revertBtn.tabIndex = -1;
           revertBtn.title = T.undo_edit;
           revertBtn.innerHTML = "&#10005;";
           origDiv.appendChild(label);
@@ -932,8 +1262,23 @@
           } catch (err) {
             statusEl.textContent = `${T.error_prefix} ${err.message}`;
             statusEl.className = "status error";
+          } finally {
+            // Table No. changed the row's identity - relocate it to its
+            // correct group position, whether or not the qty lookup
+            // succeeded (grouping is still meaningful either way).
+            resortTbodyRows(tb);
           }
         });
+
+        // Sewing Line / JobCut - Suffix / Mark Type / Table No. together
+        // identify which group a row belongs to. Deliberately only
+        // resorting off Table No. here (not each of the four individually)
+        // - it's naturally the LAST field filled in when adding a new row
+        // top-to-bottom, so by the time it changes the whole identity is
+        // already set. Resorting after every single identity field would
+        // rebuild the row mid-fill-in and disrupt tabbing from one field to
+        // the next (the field about to be focused gets destroyed and
+        // recreated out from under the user).
 
         // Recalculate table selection once the user finishes editing Qty or
         // Target (fires on blur-after-change, not on every keystroke). Table
@@ -954,7 +1299,7 @@
         // the revert/remove action below. preventDefault() on mousedown stops
         // the focus change before it happens.
         tb.addEventListener("mousedown", (e) => {
-          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".swap-shift-btn")) {
+          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".swap-shift-btn") || e.target.closest(".insert-row-below-btn")) {
             e.preventDefault();
           }
         });
@@ -966,6 +1311,13 @@
           }
           if (e.target.closest(".remove-btn")) {
             e.target.closest("tr").remove();
+            updateRowCount(tb);
+            return;
+          }
+          if (e.target.closest(".insert-row-below-btn")) {
+            const currentRow = e.target.closest("tr");
+            const newRow = buildRow(null, "group-b");
+            currentRow.after(newRow);
             updateRowCount(tb);
             return;
           }
@@ -1010,7 +1362,11 @@
         btn.addEventListener("click", () => {
           const tb = getTbody(btn.dataset.building);
           if (!tb) return;
-          tb.appendChild(buildRow(null, "group-b"));
+          // New row goes to the TOP - easy to find and fill in without
+          // scrolling. Once its Sewing Line / JobCut - Suffix / Mark Type /
+          // Table No. are filled in (see the "change" listener below), it
+          // automatically relocates to its correct group position.
+          tb.insertBefore(buildRow(null, "group-b"), tb.firstChild);
           updateRowCount(tb);
         });
       });
