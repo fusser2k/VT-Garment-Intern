@@ -56,14 +56,11 @@ from cutplan2 import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-ALLOCATION_MEMORY_PATH = os.path.join(DATA_DIR, "allocation_memory.json")
 SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-17.xlsx")
 WIP_SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "WIP_17-08-2569.xlsx")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
 
 app = Flask(__name__)
 app.secret_key = "cut-planning-model-v2-local-dev"  # only used for session cookie + flash; change if deploying beyond localhost
@@ -322,17 +319,10 @@ def cut_plan():
         flash(translate("run_tab1_first", _get_lang()))
         return redirect(url_for("index", tab=3))
 
-    shift_choice = request.form.get("shift_choice")
-    if shift_choice not in ("Morning", "Afternoon"):
-        flash(translate("please_choose_shift", _get_lang()))
-        return redirect(url_for("index", tab=3))
-
     run_datetime = datetime.now()
 
     try:
-        plan_df, run_info = build_cut_plan(
-            extraction["df"], run_datetime, memory_path=ALLOCATION_MEMORY_PATH, shift_choice=shift_choice
-        )
+        plan_df, run_info = build_cut_plan(extraction["df"], run_datetime)
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:
         flash(f"Error while building the cut plan: {e}")
@@ -371,9 +361,7 @@ def recalc_cut_plan_route(job_id):
     current_rows = payload.get("rows", [])
 
     try:
-        fresh_plan_df = recalc_cut_plan(
-            extraction["df"], current_rows, cutplan["run_info"], memory_path=ALLOCATION_MEMORY_PATH
-        )
+        fresh_plan_df = recalc_cut_plan(extraction["df"], current_rows, cutplan["run_info"])
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"Could not recalculate the plan: {e}"}), 400
@@ -499,20 +487,6 @@ def download_cutplan_file(job_id, building_key):
 
     download_name = f"{building_key_full} of {datetime.now().date().isoformat()}.xlsx"
     return send_file(output_path, as_attachment=True, download_name=download_name)
-
-
-@app.route("/reset-allocation-memory", methods=["POST"])
-def reset_allocation_memory():
-    """Clear the persistent record of which tables were already planned
-    before (data/allocation_memory.json), so the next "Generate cut plan"
-    treats every table as brand new. Mainly useful when testing repeatedly
-    with the SAME input file, whose Status values never actually change
-    between runs - without a reset, every table looks "still incomplete"
-    every time, so carry-over triggers on every single row."""
-    if os.path.exists(ALLOCATION_MEMORY_PATH):
-        os.remove(ALLOCATION_MEMORY_PATH)
-    flash(translate("reset_memory_confirm", _get_lang()))
-    return redirect(url_for("index", tab=3))
 
 
 if __name__ == "__main__":

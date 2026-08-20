@@ -51,12 +51,6 @@
   .decoration-flag-text { flex: 1; }
   .decoration-flag-dismiss { background: none; border: none; color: #7a5200; cursor: pointer; font-size: 10px; line-height: 1; padding: 0 2px; flex-shrink: 0; }
   .decoration-flag-dismiss:hover { color: #4d3400; }
-  .shift-choice-row { display: flex; gap: 24px; margin-bottom: 16px; }
-  .shift-choice-option { font-weight: normal; display: flex; align-items: center; gap: 6px; cursor: pointer; }
-  .shift-choice-hint { color: #777; font-size: 12px; font-weight: normal; }
-  .reset-memory-row { margin-top: 4px; }
-  .btn-link { background: none; border: none; color: #777; font-size: 12px; text-decoration: underline; cursor: pointer; padding: 4px 0; }
-  .btn-link:hover { color: #1F4E78; background: none; }
   .edit-note { color: #555; font-size: 13px; background: #f6f8fa; padding: 10px 16px; border-radius: 6px; margin-bottom: 14px; }
   .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .btn { border: none; padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer; }
@@ -90,6 +84,10 @@
   .revert-btn { background: none; border: none; color: #1F4E78; cursor: pointer; font-size: 10px; line-height: 1; padding: 0 2px; text-decoration: none; }
   .revert-btn:hover { color: #b3261e; }
   td.edited input { background: #fff8e6; border: 1px solid #f0dca0; }
+  td.shift-qty-cell .shift-qty-row { display: flex; align-items: center; gap: 2px; }
+  td.shift-qty-cell input { flex: 1; min-width: 0; }
+  .swap-shift-btn { background: none; border: 1px solid #cfe0f0; border-radius: 3px; color: #1F4E78; cursor: pointer; font-size: 13px; line-height: 1; padding: 3px 5px; flex-shrink: 0; }
+  .swap-shift-btn:hover { background: #eef3f9; border-color: #1F4E78; }
   .remove-btn { background: none; border: none; color: #b3261e; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; }
   .remove-btn:hover { text-decoration: underline; }
   .table-wrap { max-height: 60vh; overflow: auto; border: 1px solid #ddd; border-radius: 6px; }
@@ -318,7 +316,15 @@
             </td>
           {% elif col in ['Cut Plan Qty', 'Diff'] %}
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
-          {% elif col in ['Sewing target per day', 'Table No.', 'Cut Plan Morning', 'Cut Plan Afternoon'] %}
+          {% elif col in ['Cut Plan Morning', 'Cut Plan Afternoon'] %}
+            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }} shift-qty-cell">
+              <div class="shift-qty-row">
+                <input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}">
+                <button type="button" class="swap-shift-btn" title="{{ t('js_swap_shift') }}">&#8646;</button>
+              </div>
+              <div class="orig-value"></div>
+            </td>
+          {% elif col in ['Sewing target per day', 'Table No.'] %}
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
           {% else %}
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
@@ -370,22 +376,7 @@
     </div>
 
     <form class="upload-form" action="{{ url_for('cut_plan') }}" method="post">
-      <label>{{ t('shift_choice_question') }}</label>
-      <div class="shift-choice-row">
-        <label class="shift-choice-option">
-          <input type="radio" name="shift_choice" value="Morning" {{ 'checked' if not (cutplan and cutplan.run_info.shift_choice == 'Afternoon') }}>
-          {{ t('shift_morning') }} <span class="shift-choice-hint">{{ t('shift_morning_hint') }}</span>
-        </label>
-        <label class="shift-choice-option">
-          <input type="radio" name="shift_choice" value="Afternoon" {{ 'checked' if (cutplan and cutplan.run_info.shift_choice == 'Afternoon') }}>
-          {{ t('shift_afternoon') }} <span class="shift-choice-hint">{{ t('shift_afternoon_hint') }}</span>
-        </label>
-      </div>
       <button type="submit">{{ t('generate_cut_plan_btn') }}</button>
-    </form>
-
-    <form action="{{ url_for('reset_allocation_memory') }}" method="post" class="reset-memory-row">
-      <button type="submit" class="btn-link" title="{{ t('reset_memory_hint') }}">{{ t('reset_memory_btn') }}</button>
     </form>
 
     {% if cutplan %}
@@ -403,9 +394,7 @@
 
       <div class="actions">
         <div class="run-info">
-          {{ t('generated_label') }} {{ cutplan.run_info.run_datetime.strftime('%Y-%m-%d %H:%M') }} &middot;
-          {{ t('detected_as') }} <strong>{{ t('shift_morning') if cutplan.run_info.shift_label == 'Morning' else t('shift_afternoon') }}</strong> &middot;
-          {{ t('planned_qty_assigned') }} <strong>{{ cutplan.run_info.plan_date.strftime('%Y-%m-%d') }} {{ t('shift_morning') if cutplan.run_info.shift_label == 'Morning' else t('shift_afternoon') }}</strong>
+          {{ t('generated_label') }} {{ cutplan.run_info.run_datetime.strftime('%Y-%m-%d %H:%M') }}
           &middot; <span id="cutplan-row-count-total">{{ cutplan.row_count }}</span> {{ t('table_rows_planned_total') }}
         </div>
         <div class="toolbar">
@@ -447,7 +436,6 @@
       const COLUMNS = {{ (cutplan.columns if cutplan else []) | tojson }};
       const GROUP_COLS = ["Sewing Line", "JobCut - Suffix", "Mark Type"];
       const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"];
-      const CURRENT_SHIFT = {{ (cutplan.run_info.shift_label if cutplan else "Morning") | tojson }};
       const NUMERIC_COLS = ["Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"];
       const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
       const BUILDING_1_LINES = {{ building_1_lines | tojson }};
@@ -553,7 +541,21 @@
           input.value = startValue;
           input.dataset.original = baselineEntry ? (baselineEntry[col] ?? startValue) : startValue;
 
-          td.appendChild(input);
+          if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
+            td.classList.add("shift-qty-cell");
+            const row = document.createElement("div");
+            row.className = "shift-qty-row";
+            row.appendChild(input);
+            const swapBtn = document.createElement("button");
+            swapBtn.type = "button";
+            swapBtn.className = "swap-shift-btn";
+            swapBtn.title = T.swap_shift;
+            swapBtn.innerHTML = "&#8646;";
+            row.appendChild(swapBtn);
+            td.appendChild(row);
+          } else {
+            td.appendChild(input);
+          }
 
           if (col === "JobCut - Suffix") {
             const isContJobcut = contFlags && contFlags["JobCut - Suffix"];
@@ -760,11 +762,14 @@
           recalcGroupQtyDiff(tr);
         }
         if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
-          // recalcGroupQtyDiff sums every row's CURRENT Morning + Afternoon in
-          // this group. If this was the only outstanding edit, that naturally
-          // brings Qty/Diff back to their original totals; if other edits are
-          // still present elsewhere in the group, it recalculates against
-          // whatever's still there rather than forcing a full revert.
+          // Morning and Afternoon are a pair - revert BOTH together, not
+          // just the one clicked. Otherwise reverting only one side after
+          // using the swap button would leave the same quantity showing in
+          // both cells at once (an inconsistent, duplicated state).
+          const morningEl = cellInput(tr, "Cut Plan Morning");
+          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+          if (morningEl) { morningEl.value = morningEl.dataset.original ?? ""; updateOriginalIndicator(morningEl); }
+          if (afternoonEl) { afternoonEl.value = afternoonEl.dataset.original ?? ""; updateOriginalIndicator(afternoonEl); }
           recalcGroupQtyDiff(tr);
         }
       }
@@ -782,15 +787,10 @@
         } else if (hadAfternoon && !hadMorning) {
           if (afternoonEl) afternoonEl.value = qty;
         } else {
-          // Both zero (e.g. a brand-new row) or ambiguous (both set) - default
-          // to the shift this run is currently planning for.
-          if (CURRENT_SHIFT === "Morning") {
-            if (morningEl) morningEl.value = qty;
-            if (afternoonEl) afternoonEl.value = 0;
-          } else {
-            if (afternoonEl) afternoonEl.value = qty;
-            if (morningEl) morningEl.value = 0;
-          }
+          // Both zero (e.g. a brand-new row) or ambiguous (both set) -
+          // default to Morning, matching the single-table default rule.
+          if (morningEl) morningEl.value = qty;
+          if (afternoonEl) afternoonEl.value = 0;
         }
         if (morningEl) updateOriginalIndicator(morningEl);
         if (afternoonEl) updateOriginalIndicator(afternoonEl);
@@ -828,6 +828,26 @@
           if (qtyEl) { qtyEl.value = total; updateOriginalIndicator(qtyEl); }
           if (diffEl) { diffEl.value = diff; updateOriginalIndicator(diffEl); }
         });
+      }
+
+      // ---- Requirement: a button on Cut Plan Morning/Afternoon moves that
+      // row's quantity to the opposite shift (Morning -> Afternoon or vice
+      // versa). Since this just sets input values the normal way, it gets
+      // the usual "Original: X" + revert (✕) treatment for free - clicking
+      // revert on either cell undoes the swap.
+      function swapRowShift(tr) {
+        const morningEl = cellInput(tr, "Cut Plan Morning");
+        const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
+        if (!morningEl || !afternoonEl) return;
+
+        const m = morningEl.value;
+        const a = afternoonEl.value;
+        morningEl.value = a;
+        afternoonEl.value = m;
+
+        updateOriginalIndicator(morningEl);
+        updateOriginalIndicator(afternoonEl);
+        recalcGroupQtyDiff(tr);
       }
 
       // ---- Requirement: editing a row's Table No. looks up that specific
@@ -934,7 +954,7 @@
         // the revert/remove action below. preventDefault() on mousedown stops
         // the focus change before it happens.
         tb.addEventListener("mousedown", (e) => {
-          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss")) {
+          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".swap-shift-btn")) {
             e.preventDefault();
           }
         });
@@ -947,6 +967,10 @@
           if (e.target.closest(".remove-btn")) {
             e.target.closest("tr").remove();
             updateRowCount(tb);
+            return;
+          }
+          if (e.target.closest(".swap-shift-btn")) {
+            swapRowShift(e.target.closest("tr"));
             return;
           }
           if (e.target.closest(".revert-btn")) {

@@ -71,8 +71,6 @@ cut_plan_model_v2/
 │   └── BufferCuttingOrderForm_2026-08-17.xlsx   # Sample input for Tab 1
 ├── uploads/                 # Uploaded files land here (web server mode)
 ├── outputs/                 # Generated Extracted_Data.xlsx lands here
-├── data/
-│   └── allocation_memory.json  # Persistent Tab 3 shift-allocation memory (created on first use)
 └── requirements.txt
 ```
 
@@ -186,50 +184,43 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
 3. Tables are planned **smallest Table ID first**, adding tables in that
    order until the running combined quantity reaches that group's
    **Sewing Target Per Day**.
-4. **You choose Morning or Afternoon when you click "Generate cut plan"** —
-   a radio button on Tab 3, not the wall-clock. Choosing **Morning** means
-   the planned quantity goes into **Cut Plan Afternoon of the same day**;
-   choosing **Afternoon** means it goes into **Cut Plan Morning of the next
-   day**. (The old automatic clock-based behavior still exists as
-   `determine_shift()` and is used as a fallback for the CLI, which has no
-   UI to ask the question — but the web app always uses your explicit
-   choice.)
-5. **The model remembers which table/JobCut has already been planned
-   before, across every session — not just within one browser tab.** This
-   is stored in a plain JSON file at `data/allocation_memory.json`, keyed
-   by (Sewing Line, JobCut - Suffix, Mark Type, Table No.), and survives
-   server restarts. If a table you already planned shows up again in a
-   later "Generate cut plan" (meaning it's still incomplete — it wasn't
-   marked Completed in Tab 1's data), it is **not** reset to the shift you
-   just chose. Instead, it advances exactly **one step forward** from
-   wherever it was last allocated (Morning → Afternoon same day; Afternoon
-   → Morning next day) — so a table that keeps not getting finished keeps
-   sliding through the schedule instead of resetting every time someone
-   reruns the model. This happens silently in the background — it does
-   **not** write anything into Note (see below); the only visible effect is
-   which of Cut Plan Morning/Afternoon ends up holding the quantity. See
-   `_assign_table_shift()` in `cutplan2/model.py` for the exact logic, used
-   by both the initial generation and any later recalculation (e.g. raising
-   a target pulls in a table that turns out to have been planned before —
-   it goes through the same check).
-
-   **Testing note:** this only distinguishes a table as "still incomplete"
-   based on Tab 1's Status field. If you keep re-uploading the *same* file
-   without ever changing any Status values, every table will look
-   "still incomplete" on every run, so carry-over will trigger every single
-   time — that's expected, not a bug. A small **"Reset planning memory"**
-   button on Tab 3 (next to "Generate cut plan") clears
-   `data/allocation_memory.json`, so the next generation treats every table
-   as brand new again — useful when testing repeatedly with an unchanged
-   file.
-6. **Note always starts blank, for every table — new or carried over.** The
+4. **Cut Plan Morning / Cut Plan Afternoon is decided per group, purely
+   from the selected tables' quantities** — no wall-clock time, no user
+   choice, no cross-session memory involved:
+   - If a group has **exactly one** selected table, its whole quantity goes
+     to **Morning** by default.
+   - If a group has **more than one** selected table, they're split into a
+     "top" part (Morning) and a "bottom" part (Afternoon): walking the
+     tables in Table ID order, each stays in the top/Morning part and its
+     quantity accumulates, until the running total reaches **half of the
+     group's own Cut Plan Qty** — the total quantity actually being
+     allocated across the selected tables, **not** half of Sewing Target
+     Per Day (the selected tables often don't add up anywhere near the
+     target, and the split still needs to happen either way). The table
+     whose addition crosses that halfway point is still counted in the
+     top/Morning part; every table after that point goes to the
+     bottom/Afternoon part — so when the total can't split into two exactly
+     equal halves, the larger portion normally lands in Morning.
+   - **A split always happens whenever there's more than one table.** If
+     one large table (typically the last one in Table ID order) is big
+     enough that the halfway point isn't crossed until it's added — which
+     would otherwise leave Afternoon empty — that table is moved to
+     Afternoon instead. This is the one case where the larger side can end
+     up in Afternoon rather than Morning; guaranteeing an actual split
+     takes priority.
+   - This is fully deterministic and gets **recomputed fresh** every time
+     the plan is generated or recalculated (e.g. editing a target or a
+     table's quantity can shift where the halfway point falls, moving
+     tables between Morning and Afternoon accordingly). See
+     `split_morning_afternoon()` in `cutplan2/model.py` for the exact logic.
+5. **Note always starts blank, for every table.** The
    model never writes anything into it automatically; it's reserved
    entirely for the user's own manual comments, added on the
    editable table before saving.
-7. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
+6. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
    on the page and in the downloaded Excel — matching the reference
    planning sheet's layout.
-8. **Repeated values are merged, not repeated** — Sewing Line and JobCut -
+7. **Repeated values are merged, not repeated** — Sewing Line and JobCut -
    Suffix show/hide together, re-displaying at the start of every JobCut
    (not merged across a whole Sewing Line block). Mark Type re-displays at
    the start of every Mark Type sub-block within a JobCut. Sewing target
@@ -246,7 +237,7 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    they stay one row per table. This sort/merge/border grouping is
    re-applied after every recalculation too, not just on the initial
    "Generate cut plan".
-9. **Split into two tables by building**, based on Sewing Line — "Building 1
+8. **Split into two tables by building**, based on Sewing Line — "Building 1
    of `<date>`" and "Building 2 of `<date>`", shown as two separate tables
    on the page and downloaded as two **separate Excel files** (plus a third
    "Unassigned" file if any Sewing Line doesn't match either list — kept,
@@ -254,12 +245,12 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    actually click Save/Download, not the plan's target date. The building
    lists live in `BUILDING_1_LINES` / `BUILDING_2_LINES` at the top of
    `cutplan2/model.py` — edit those if a Sewing Line's building changes.
-10. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
+9. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
    more than one Mark Type needing decoration, you don't have to plan every
    Mark Type or plan enough tables to fully reach the Sewing target per
    day — partial planning is fine. Click the ✕ on the banner to dismiss it;
    this is purely a one-time on-page reminder, not saved or synced anywhere.
-11. **Which specific JobCuts that applies to is flagged directly in the
+10. **Which specific JobCuts that applies to is flagged directly in the
     table.** Using Tab 1's `Decoration` field, any JobCut with more than one
     Mark Type marked `Decoration = Yes` gets a small amber
     "⚑ Multiple Mark Types need decoration" badge under its JobCut - Suffix
@@ -296,6 +287,14 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
 - **Editing a row's Cut Plan Qty syncs that row's Morning/Afternoon** —
   whichever shift is currently active for that row (nonzero) is updated to
   match the new quantity.
+- **A small ⇄ button on each Cut Plan Morning/Afternoon cell moves that
+  row's quantity to the opposite shift** — click it and Morning becomes
+  Afternoon (or vice versa) for that one row. Since this is just another
+  edit, it gets the same **"Original: …" + ✕ revert** treatment as any
+  other cell — click revert on *either* side afterward and both cells
+  return to their true original values together (not just the one you
+  clicked, which would otherwise leave the same quantity duplicated in
+  both cells).
 - **Editing a row's Table No. looks up that specific table's real quantity
   from Tab 1's data** and applies it to that row (Morning/Afternoon,
   whichever shift was active), then recomputes Cut Plan Qty and Diff for
@@ -414,15 +413,13 @@ worker handled a given request. If you need more concurrency, increase
 `--threads` instead of `--workers`.
 
 **The filesystem (and `SESSIONS`) is reset on every redeploy.** Uploaded
-files, generated Excel files, and — notably — the persistent
-`data/allocation_memory.json` (Tab 3's cross-session shift-carryover memory,
-see above) all live on Railway's container filesystem, which persists
-between requests but is wiped clean on every new deploy/restart. For
-continuous day-to-day use between deploys this is fine; just be aware a
-redeploy resets the "which tables were already planned" memory too. If that
-matters for your use case, that file would need to move to a real database
-or a mounted volume — not set up here, since the original request was for a
-local tool.
+files and generated Excel files live on Railway's container filesystem,
+which persists between requests but is wiped clean on every new
+deploy/restart. Since none of the app's core planning logic depends on
+persisted state between deploys (Tab 3's Morning/Afternoon split is
+recomputed fresh from Tab 1's data every time), this doesn't affect
+correctness — it just means uploaded files and past sessions don't survive
+a redeploy, same as restarting the app locally.
 
 ## Extending Tab 3 to also use the WIP file, once its template is known
 

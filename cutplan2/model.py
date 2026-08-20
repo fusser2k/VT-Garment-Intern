@@ -495,57 +495,65 @@ CUT_PLAN_COLUMNS = [
     "Note",
 ]
 
-# Hour (24h) that separates "morning" from "afternoon" use of the model.
-# Before this hour -> treated as a morning run. At/after -> afternoon run.
-SHIFT_CUTOFF_HOUR = 12
 
+def split_morning_afternoon(selected: list) -> dict:
+    """Decide, for one (Sewing Line, JobCut - Suffix, Mark Type) group's
+    already-selected tables (in ascending Table ID order), which of Cut
+    Plan Morning / Cut Plan Afternoon each table's quantity goes into.
 
-def determine_shift(run_datetime: Optional[datetime] = None):
-    """Decide which shift the planned quantity should land in, based on when
-    the model is run:
+    Rule:
+      - Exactly one table selected -> its whole quantity goes to Morning,
+        by default.
+      - More than one table selected -> split into a "top" part (Morning)
+        and a "bottom" part (Afternoon): walk the tables in order, keeping
+        each one in the top/Morning part and accumulating its quantity,
+        until the running total reaches HALF OF THE GROUP'S CUT PLAN QTY
+        (the total quantity actually being allocated across this same
+        Mark Type + JobCut - NOT half of Sewing Target Per Day, since the
+        selected tables don't always add up anywhere near the target - the
+        split still has to happen even when the group is nowhere near its
+        target). The table whose addition reaches that halfway point is
+        still part of the top/Morning part; every table AFTER that point
+        goes to the bottom/Afternoon part. When the total can't be split
+        into two exactly equal halves, this naturally puts the LARGER
+        portion in Morning and the smaller one in Afternoon, since the
+        crossing table stays in the top/Morning part.
+      - Whenever there's more than one table, SOME split always happens -
+        if one large table (usually the last one in Table ID order) is big
+        enough that the halfway point isn't crossed until it's added,
+        leaving nothing for Afternoon, that table is moved to Afternoon
+        instead so the group isn't left entirely in Morning. (This is the
+        one case where the larger side can end up in Afternoon rather than
+        Morning - guaranteeing an actual split takes priority here.)
 
-      - Run in the MORNING (before SHIFT_CUTOFF_HOUR)  -> plan goes to
-        THIS SAME DAY's afternoon.
-      - Run in the AFTERNOON (at/after SHIFT_CUTOFF_HOUR) -> plan goes to
-        NEXT DAY's morning.
-
-    This is the automatic, clock-based fallback (used by the CLI, and if
-    the web app is ever called without an explicit user choice). The web
-    app itself now asks the user directly instead - see
-    determine_shift_from_choice().
-
-    Returns (shift_label, plan_date).
+    `selected` is a list of (table_id, qty) tuples, already in the order
+    they were selected (ascending Table ID). Returns {table_id: (morning, afternoon)}.
     """
-    now = run_datetime or datetime.now()
-    if now.hour < SHIFT_CUTOFF_HOUR:
-        return "Afternoon", now.date()
-    else:
-        return "Morning", (now + timedelta(days=1)).date()
+    if len(selected) <= 1:
+        return {tid: (qty, 0) for tid, qty in selected}
 
+    total_qty = sum(qty for _, qty in selected)
+    half_total = total_qty / 2
+    running = 0
+    crossed_half = False
+    result = {}
+    for tid, qty in selected:
+        if not crossed_half:
+            result[tid] = (qty, 0)
+            running += qty
+            if running >= half_total:
+                crossed_half = True
+        else:
+            result[tid] = (0, qty)
 
-def determine_shift_from_choice(user_choice: str, run_datetime: Optional[datetime] = None):
-    """Decide which shift the planned quantity should land in, based on
-    which shift the USER says they're planning for right now (not the
-    wall-clock time):
+    # Guarantee an actual split whenever there's more than one table: if the
+    # halfway point wasn't crossed until the very last table, everything
+    # would otherwise land in Morning with nothing in Afternoon.
+    if all(afternoon == 0 for _, afternoon in result.values()):
+        last_tid, last_qty = selected[-1]
+        result[last_tid] = (0, last_qty)
 
-      - User is planning the MORNING shift -> the quantity goes to THIS
-        SAME DAY's afternoon.
-      - User is planning the AFTERNOON shift -> the quantity goes to the
-        NEXT DAY's morning.
-
-    (Same mapping as determine_shift(), just driven by an explicit choice
-    instead of guessed from the clock.)
-
-    Returns (shift_label, plan_date).
-    """
-    now = run_datetime or datetime.now()
-    choice = str(user_choice).strip().lower()
-    if choice == "morning":
-        return "Afternoon", now.date()
-    elif choice == "afternoon":
-        return "Morning", (now + timedelta(days=1)).date()
-    else:
-        raise ValueError(f"user_choice must be 'Morning' or 'Afternoon', got {user_choice!r}")
+    return result
 
 
 def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
@@ -704,97 +712,8 @@ def compute_continuation_flags(rows) -> list:
     return flags
 
 
-DEFAULT_ALLOCATION_MEMORY_FILENAME = "allocation_memory.json"
 
-
-def _default_memory_path() -> str:
-    """cutplan2/model.py -> <project root>/data/allocation_memory.json"""
-    pkg_dir = os.path.dirname(os.path.abspath(__file__))
-    project_root = os.path.dirname(pkg_dir)
-    return os.path.join(project_root, "data", DEFAULT_ALLOCATION_MEMORY_FILENAME)
-
-
-def load_allocation_memory(memory_path: Optional[str] = None) -> dict:
-    """Load the persistent record of which (Sewing Line, JobCut - Suffix,
-    Mark Type, Table No.) tables have already been planned before, and
-    which shift/date they were last assigned to. This is a plain JSON file
-    on disk - it survives server restarts and is shared across every
-    "Generate cut plan" run, not just one browser session, since a table
-    genuinely not being finished is a fact about the real world, not about
-    who happens to be looking at the tool right now."""
-    path = memory_path or _default_memory_path()
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return {}
-
-
-def save_allocation_memory(memory: dict, memory_path: Optional[str] = None) -> None:
-    path = memory_path or _default_memory_path()
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(memory, f, indent=2, ensure_ascii=False, sort_keys=True)
-
-
-def _advance_shift(shift_label: str, plan_date: date) -> Tuple[str, date]:
-    """Advance exactly one shift step forward: Morning -> Afternoon (same
-    day); Afternoon -> Morning (next day). Mirrors determine_shift()'s own
-    step so a carried-over table follows the same cadence a fresh table
-    would if planned one step later."""
-    if shift_label == "Morning":
-        return "Afternoon", plan_date
-    return "Morning", plan_date + timedelta(days=1)
-
-
-def _memory_key(sewing_line, jobcut_suffix, mark_type, table_id) -> str:
-    return f"{sewing_line}|{jobcut_suffix}|{mark_type}|{table_id}"
-
-
-def _assign_table_shift(key: str, natural_shift: str, natural_date: date, memory: dict):
-    """Decide which (shift, date) a specific table's quantity should be
-    allocated to THIS time, and record that decision into `memory` (in
-    place) so the next time this exact table is planned, it picks up from
-    here instead of resetting.
-
-    - Never planned before -> the natural shift/date for the run happening
-      right now (see determine_shift()).
-    - Already planned before, and it's back up for planning again (meaning
-      it wasn't completed) -> advance ONE step from its LAST recorded
-      allocation, not from today's natural shift - so a table that keeps
-      not getting finished keeps sliding forward through the schedule
-      (afternoon -> next morning -> next afternoon -> ...) rather than
-      being reset to "today" every time someone reruns the model.
-
-    Returns (final_shift, final_date, was_carried_over).
-    """
-    prev = memory.get(key)
-    if prev is None:
-        final_shift, final_date = natural_shift, natural_date
-        was_carried_over = False
-    else:
-        try:
-            prev_date = date.fromisoformat(prev["date"])
-            prev_shift = prev["shift"]
-        except (KeyError, ValueError, TypeError):
-            final_shift, final_date = natural_shift, natural_date
-            memory[key] = {"shift": final_shift, "date": final_date.isoformat()}
-            return final_shift, final_date, False
-        final_shift, final_date = _advance_shift(prev_shift, prev_date)
-        was_carried_over = True
-
-    memory[key] = {"shift": final_shift, "date": final_date.isoformat()}
-    return final_shift, final_date, was_carried_over
-
-
-def build_cut_plan(
-    df: pd.DataFrame,
-    run_datetime: Optional[datetime] = None,
-    memory_path: Optional[str] = None,
-    shift_choice: Optional[str] = None,
-):
+def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
     """Build the Tab 3 cut plan from Tab 1's extracted DataFrame.
 
     Rules:
@@ -809,33 +728,18 @@ def build_cut_plan(
          tables are planned smallest Table ID first, adding tables in that
          order until the running combined Qty reaches (or first exceeds)
          that group's Sewing Target Per Day.
-      4. Each table's quantity goes into whichever shift (Cut Plan Morning
-         or Cut Plan Afternoon) it's actually assigned to - which is NOT
-         always just "whatever the current run's natural shift is":
-           - A table being planned for the FIRST time ever gets the shift
-             the USER says they're planning for right now (shift_choice —
-             "Morning" or "Afternoon"; see determine_shift_from_choice()).
-             Falls back to the automatic clock-based determine_shift() if
-             no shift_choice is given (e.g. from the CLI).
-           - A table that has appeared in a PREVIOUS cut plan and is still
-             showing up now (i.e. it wasn't completed) is NOT reset to the
-             current choice - it advances ONE step forward from wherever
-             it was last allocated, so a table that keeps not getting
-             finished keeps sliding through the schedule instead of
-             resetting every time the model is rerun. This is tracked in
-             a persistent, cross-session memory file (see
-             load_allocation_memory()/save_allocation_memory()), not just
-             within one browser session.
-         A table whose final allocation differs from the run's natural
-         shift/date gets a note in its Note column explaining the carry-over.
+      4. Cut Plan Morning / Cut Plan Afternoon is decided per group, from
+         the selected tables' quantities alone - see split_morning_afternoon():
+         a single selected table goes entirely to Morning; with more than
+         one, tables are split into a "top" (Morning) part and a "bottom"
+         (Afternoon) part based on where the running quantity crosses half
+         of the group's own Cut Plan Qty (the total quantity actually being
+         allocated across the selected tables - not half of Sewing Target
+         Per Day, which the selected tables don't always add up anywhere
+         near).
 
     Returns (plan_df, run_info).
     """
-    if shift_choice:
-        shift_label, plan_date = determine_shift_from_choice(shift_choice, run_datetime)
-    else:
-        shift_label, plan_date = determine_shift(run_datetime)
-
     table_level = _candidate_table_pool(df)
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
@@ -844,8 +748,6 @@ def build_cut_plan(
     # (matches the reference planning sheet's layout).
     table_level = table_level.sort_values(group_cols + ["Table ID"]).reset_index(drop=True)
     output_rows = []
-
-    memory = load_allocation_memory(memory_path)
 
     for keys, g in table_level.groupby(group_cols, sort=False, dropna=False):
         sewing_line, jobcut_suffix, mark_type = keys
@@ -859,29 +761,16 @@ def build_cut_plan(
             if cum >= target:
                 break
             cum += row["Combined_Qty"]
-            selected.append(row)
+            table_id = int(row["Table ID"]) if pd.notna(row["Table ID"]) else ""
+            selected.append((table_id, int(row["Combined_Qty"])))
 
         cut_plan_qty = cum
         diff = cut_plan_qty - target
 
-        running = 0
-        for row in selected:
-            qty = int(row["Combined_Qty"])
-            table_id = int(row["Table ID"]) if pd.notna(row["Table ID"]) else ""
+        split = split_morning_afternoon(selected)
 
-            key = _memory_key(sewing_line, jobcut_suffix, mark_type, table_id)
-            # was_carried_over is intentionally unused for the Note text below -
-            # Note is reserved purely for the user's own manual comments, so
-            # nothing gets auto-written into it, even for a table that slid
-            # forward because it wasn't completed. The carry-over is still
-            # fully reflected in which of Cut Plan Morning/Afternoon gets the
-            # quantity (via final_shift below) - just not narrated in Note.
-            final_shift, final_date, _was_carried_over = _assign_table_shift(
-                key, shift_label, plan_date, memory
-            )
-            morning = qty if final_shift == "Morning" else 0
-            afternoon = qty if final_shift == "Afternoon" else 0
-            running += qty
+        for table_id, qty in selected:
+            morning, afternoon = split[table_id]
 
             output_rows.append(
                 {
@@ -898,19 +787,10 @@ def build_cut_plan(
                 }
             )
 
-    save_allocation_memory(memory, memory_path)
-
     plan_df = pd.DataFrame(output_rows, columns=CUT_PLAN_COLUMNS)
     run_info = {
         "run_datetime": run_datetime or datetime.now(),
-        "shift_label": shift_label,
-        "plan_date": plan_date,
-        # The user's ORIGINAL choice ("Morning"/"Afternoon"), as opposed to
-        # shift_label (which is the OPPOSITE - where the quantity actually
-        # landed). Kept so the web UI can re-select the same radio button
-        # the user picked, instead of always resetting to "Morning" after
-        # the page reloads with results.
-        "shift_choice": shift_choice if shift_choice in ("Morning", "Afternoon") else None,
+        "plan_date": (run_datetime or datetime.now()).date(),
     }
     return plan_df, run_info
 
@@ -937,7 +817,7 @@ def lookup_table_qty(source_df: pd.DataFrame, sewing_line: str, jobcut_suffix: s
     return int(match.iloc[0]["Combined_Qty"])
 
 
-def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict, memory_path: Optional[str] = None):
+def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict):
     """Re-run table selection after the user has edited Cut Plan Qty and/or
     Sewing target per day on the (already generated) Tab 3 table.
 
@@ -958,22 +838,18 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict,
       - Manual comments already typed into Note are preserved for tables
         that remain selected.
       - Rows for tables the user manually added (a Table No. that doesn't
-        exist in the source data for that group) are always kept, and their
+        exist in the source data for that group) are always kept as-is
+        (their own Morning/Afternoon split is never recomputed), and their
         Cut Plan Qty is added into the group's total/Diff.
-      - Morning/Afternoon for a table that was already on the page keep
-        whatever split the user currently has for it; a table that gets
-        newly pulled in by this recalculation goes through the same
-        first-time-vs-carried-over memory check build_cut_plan() uses (see
-        load_allocation_memory()) - so a table that was already planned
-        before in some other session and reappears here still slides
-        forward through the schedule instead of resetting.
+      - Cut Plan Morning / Cut Plan Afternoon for the REAL (non-manual)
+        selected tables is always freshly recomputed for the whole group
+        using split_morning_afternoon() - the same deterministic rule
+        build_cut_plan() uses - since the split boundary (half the target)
+        can shift whenever the target or a table's quantity changes.
 
     Returns a fresh plan_df (same columns/shape as build_cut_plan's output).
     """
     table_level = _candidate_table_pool(source_df)
-    shift_label = run_info["shift_label"]
-    plan_date = run_info["plan_date"]
-    memory = load_allocation_memory(memory_path)
 
     # Index candidates for fast lookup: (Sewing Line, JobCut - Suffix, Mark Type) -> DataFrame
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
@@ -1013,7 +889,6 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict,
         # no known quantity yet, and falls back to that table's real quantity
         # from the source data instead of incorrectly reusing a stale value.
         qty_override = {}
-        prev_split = {}
         note_by_table = {}
         manual_rows = []
         for r in user_rows:
@@ -1039,7 +914,6 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict,
                 note_by_table[table_id] = r.get("Note", "")
                 if has_known_qty:
                     qty_override[table_id] = to_num(morning_raw) + to_num(afternoon_raw)
-                    prev_split[table_id] = (to_num(morning_raw), to_num(afternoon_raw))
             else:
                 manual_rows.append(r)
 
@@ -1055,28 +929,18 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict,
                 table_id = int(crow["Table ID"]) if pd.notna(crow["Table ID"]) else None
                 qty = qty_override.get(table_id, crow["Combined_Qty"])
                 cum += qty
-                selected_real_rows.append((table_id, qty))
+                selected_real_rows.append((table_id, int(qty)))
             real_total = cum
 
         manual_total = sum(to_num(r.get("Cut Plan Morning")) + to_num(r.get("Cut Plan Afternoon")) for r in manual_rows)
         cut_plan_qty = real_total + manual_total
         diff = cut_plan_qty - target
 
+        split = split_morning_afternoon(selected_real_rows)
+
         for table_id, qty in selected_real_rows:
-            if table_id in prev_split:
-                morning, afternoon = prev_split[table_id]
-                note = note_by_table.get(table_id, "")
-            else:
-                key = _memory_key(sewing_line, jobcut_suffix, mark_type, table_id)
-                # was_carried_over deliberately not narrated into Note - see
-                # build_cut_plan() for why. The shift-advance itself still
-                # fully applies via final_shift below.
-                final_shift, final_date, _was_carried_over = _assign_table_shift(
-                    key, shift_label, plan_date, memory
-                )
-                morning = qty if final_shift == "Morning" else 0
-                afternoon = qty if final_shift == "Afternoon" else 0
-                note = note_by_table.get(table_id, "")
+            morning, afternoon = split[table_id]
+            note = note_by_table.get(table_id, "")
 
             output_rows.append(
                 {
@@ -1114,7 +978,6 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict,
         # Sort by Sewing Line -> JobCut - Suffix -> Mark Type, stable so each
         # group's already-correct internal Table No. order is preserved.
         result_df = result_df.sort_values(group_cols, kind="stable").reset_index(drop=True)
-    save_allocation_memory(memory, memory_path)
     return result_df
 
 
@@ -1150,13 +1013,19 @@ CUT_PLAN_ASSUMPTIONS_TEXT = [
     "Cut Plan Qty = sum of combined Qty across all tables selected for that group (repeated on",
     "each row of the group for readability). Diff = Cut Plan Qty - Sewing Target Per Day.",
     "",
-    "6. MORNING / AFTERNOON — DEPENDS ON WHEN THE MODEL IS RUN",
-    f"The model checks the current time against a {SHIFT_CUTOFF_HOUR}:00 cutoff:",
-    "  - Run before the cutoff (morning)  -> the full planned quantity goes into",
-    "    Cut Plan Afternoon, for THIS SAME DAY.",
-    "  - Run at/after the cutoff (afternoon) -> the full planned quantity goes into",
-    "    Cut Plan Morning, for the NEXT DAY.",
-    "Change SHIFT_CUTOFF_HOUR at the top of cutplan2/model.py if the actual cutoff differs.",
+    "6. MORNING / AFTERNOON SPLIT",
+    "Decided per group, from the selected tables' quantities alone - no wall-clock time or user",
+    "choice is involved:",
+    "  - If a group has exactly ONE selected table, its whole quantity goes to Cut Plan Morning.",
+    "  - If a group has MORE THAN ONE selected table, they're split into a \"top\" part (Morning)",
+    "    and a \"bottom\" part (Afternoon): walking the tables in Table ID order, each table stays",
+    "    in the top/Morning part and its quantity accumulates, until the running total reaches",
+    "    half of the group's own CUT PLAN QTY (the total quantity actually being allocated across",
+    "    the selected tables - NOT half of Sewing Target Per Day). The table whose addition",
+    "    crosses that halfway point is still counted in the top/Morning part; every table AFTER",
+    "    that point goes to the bottom/Afternoon part. When the total can't split into two exactly",
+    "    equal halves, the larger portion lands in Morning and the smaller one in Afternoon.",
+    "See split_morning_afternoon() in cutplan2/model.py for the exact logic.",
 ]
 
 
@@ -1302,10 +1171,7 @@ def write_single_building_workbook(
 
     generated_at = run_info["run_datetime"].strftime("%Y-%m-%d %H:%M")
     ws = wb.create_sheet("Cut Plan")
-    title_text = (
-        f"{building_label} of {downloaded_date.isoformat()}   |   Generated: {generated_at}   |   "
-        f"Run detected as: {run_info['shift_label']} run"
-    )
+    title_text = f"{building_label} of {downloaded_date.isoformat()}   |   Generated: {generated_at}"
     _write_cut_plan_sheet(ws, building_df, title_text, edited_at=edited_at)
 
     ws2 = wb.create_sheet("Logic & Assumptions")
@@ -1346,10 +1212,7 @@ def write_cut_plan_workbook(
     for key in ordered_keys:
         building_df = by_building[key]
         ws = wb.create_sheet(key)
-        title_text = (
-            f"{key} of {plan_date_str}   |   Generated: {generated_at}   |   "
-            f"Run detected as: {run_info['shift_label']} run"
-        )
+        title_text = f"{key} of {plan_date_str}   |   Generated: {generated_at}"
         _write_cut_plan_sheet(ws, building_df, title_text, edited_at=edited_at)
 
     # ---- Logic & Assumptions ----

@@ -109,11 +109,6 @@ TRANSLATIONS = {
         "th": "แท็บนี้สร้างจากข้อมูลที่ดึงจากแท็บ 1 ยังไม่ได้ใช้แท็บ 2 (อัปโหลด WIP) — "
               "จะเชื่อมต่อกันเมื่อเทมเพลตไฟล์ WIP ได้ข้อสรุปแล้ว",
     },
-    "shift_choice_question": {"en": "Which shift are you planning for right now?", "th": "ตอนนี้คุณกำลังวางแผนสำหรับกะไหน?"},
-    "shift_morning": {"en": "Morning", "th": "เช้า"},
-    "shift_afternoon": {"en": "Afternoon", "th": "บ่าย"},
-    "shift_morning_hint": {"en": "(quantity goes to this afternoon)", "th": "(จำนวนจะไปอยู่ที่บ่ายของวันนี้)"},
-    "shift_afternoon_hint": {"en": "(quantity goes to tomorrow morning)", "th": "(จำนวนจะไปอยู่ที่เช้าของวันพรุ่งนี้)"},
     "generate_cut_plan_btn": {"en": "Generate cut plan", "th": "สร้างแผนการตัด"},
     "flag_notice_title": {"en": "Reminder:", "th": "ข้อควรทราบ:"},
     "flag_notice_text": {
@@ -150,8 +145,6 @@ TRANSLATIONS = {
               "Download Excel ซึ่งจะบันทึกตารางของทั้งสองอาคารรวมกันเป็นไฟล์เดียว",
     },
     "generated_label": {"en": "Generated", "th": "สร้างเมื่อ"},
-    "detected_as": {"en": "Detected as a", "th": "ตรวจพบว่าเป็นกะ"},
-    "planned_qty_assigned": {"en": "Planned quantity assigned to", "th": "จำนวนที่วางแผนถูกกำหนดไปที่"},
     "table_rows_planned_total": {"en": "table row(s) planned total", "th": "แถวโต๊ะที่วางแผนทั้งหมด"},
     "save_changes_btn": {"en": "Save changes & Download Excel", "th": "บันทึกการเปลี่ยนแปลง & ดาวน์โหลด Excel"},
     "table_rows_planned": {"en": "table row(s) planned", "th": "แถวโต๊ะที่วางแผน"},
@@ -183,22 +176,6 @@ TRANSLATIONS = {
         "en": "Run Tab 1 (Buffer Cutting Order Form) first — the cut plan is built from that extracted data.",
         "th": "กรุณารันแท็บ 1 (ใบสั่งตัดบัฟเฟอร์) ก่อน — แผนการตัดจะสร้างจากข้อมูลที่ดึงมาจากแท็บนั้น",
     },
-    "please_choose_shift": {
-        "en": "Please choose whether you're planning for Morning or Afternoon.",
-        "th": "กรุณาเลือกว่าคุณกำลังวางแผนสำหรับกะเช้าหรือกะบ่าย",
-    },
-    "reset_memory_btn": {"en": "Reset planning memory", "th": "ล้างความจำการวางแผน"},
-    "reset_memory_hint": {
-        "en": "Clears the record of which tables were already planned before, so every table is "
-              "treated as brand new on the next \"Generate cut plan\". Use this if you're testing "
-              "repeatedly with the same file and don't want carry-over to kick in.",
-        "th": "ล้างประวัติว่าโต๊ะใดเคยถูกวางแผนไปแล้ว ทำให้โต๊ะทุกตัวถูกมองว่าเป็นข้อมูลใหม่ในการ \"สร้างแผนการตัด\" ครั้งถัดไป "
-              "ใช้ตัวเลือกนี้หากคุณกำลังทดสอบด้วยไฟล์เดิมซ้ำๆ และไม่ต้องการให้ระบบ carry-over ทำงาน",
-    },
-    "reset_memory_confirm": {
-        "en": "Planning memory has been reset. The next \"Generate cut plan\" will treat every table as brand new.",
-        "th": "ล้างความจำการวางแผนแล้ว การ \"สร้างแผนการตัด\" ครั้งถัดไปจะมองว่าโต๊ะทุกตัวเป็นข้อมูลใหม่",
-    },
 
     # ---- JS status strings ----
     "js_saving": {"en": "Saving\u2026", "th": "กำลังบันทึก\u2026"},
@@ -213,6 +190,7 @@ TRANSLATIONS = {
         "th": "บันทึกแล้ว (ไม่มีไฟล์ให้ดาวน์โหลด — ทั้งสองอาคารไม่มีข้อมูล)",
     },
     "js_undo_edit": {"en": "Undo this edit", "th": "เลิกทำการแก้ไขนี้"},
+    "js_swap_shift": {"en": "Move to the other shift (Morning \u2194 Afternoon)", "th": "ย้ายไปกะตรงข้าม (เช้า \u2194 บ่าย)"},
     "js_remove_row": {"en": "Remove row", "th": "ลบแถว"},
     "js_dismiss_notice": {"en": "Dismiss this notice", "th": "ปิดข้อความนี้"},
     "js_dismiss_flag": {"en": "Dismiss this flag", "th": "ปิดป้ายนี้"},
