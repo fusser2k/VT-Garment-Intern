@@ -137,11 +137,17 @@ another.
 The known WIP template repeats its header row once per group of sewing
 lines (individually-named lines, then again for merged lines like
 `VS02+06`). `load_wip()` in `cutplan2/model.py` doesn't assume a fixed row
-range — it scans column B for the literal header text (`ไลน์เย็บ`) to find
-where each block starts, and collects every non-blank row under it,
-stopping the moment it hits the unrelated table-status mini-table further
-down the same sheet (marked by column B reading `ไลน์`). This keeps working
-even if a future day's file has a different number of sewing lines.
+range — it scans column B for the literal header text (`ไลน์เย็บ`, or the
+English `Sewing line` used in some template revisions — matched
+case-insensitively) to find where each block starts, and collects every
+non-blank row under it, stopping the moment it hits the unrelated
+table-status mini-table further down the same sheet (marked by column B
+reading `ไลน์`). This keeps working even if a future day's file has a
+different number of sewing lines.
+
+Column A of each row (**Sewing Line Code**, e.g. `VSEW012`) is extracted
+too — this is what ties a WIP row back to Tab 1's own Sewing Line
+identifier for the Tab 3 target override described above.
 
 The ~40 columns extracted cover: targets (per hour, morning, afternoon,
 OT — with/without OT), actuals for each shift, WIP quantities at each stage
@@ -193,10 +199,36 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
 2. **Colorways sharing a Table ID are combined** into one quantity for that
    table before planning.
 3. Tables are planned **smallest Table ID first**, adding tables in that
-   order until the running combined quantity reaches that group's
-   **Sewing Target Per Day (with OT)** — Tab 3's planning always uses the
-   with-OT figure, not the computed no-OT one (which is purely informational
-   on Tab 1).
+   order until the running combined quantity reaches that group's target —
+   the with-OT figure, not the computed no-OT one (which is purely
+   informational on Tab 1). **A fractional target (e.g. a WIP override like
+   412.8) is always rounded UP** to a whole number before anything else
+   happens with it — never down — so a group never looks like it needs
+   fewer tables than it actually does. That same rounded-up whole number is
+   used consistently everywhere: the table-selection cutoff, the displayed
+   Sewing target per day, and the Diff calculation, so the numbers on the
+   page always add up exactly (Cut Plan Qty − Sewing target per day = Diff,
+   with no rounding surprises). **Which "with-OT" value gets used depends on
+   whether Tab 2 has WIP data for that Sewing Line:**
+   - **If Tab 2's WIP data has been uploaded this session and covers that
+     Sewing Line**, its own **Target for Day (with OT)** overrides Tab 1's
+     Sewing Target Per Day (with OT) for every group on that line — since
+     different sewing lines can have a different actual daily target that
+     Tab 1's data alone doesn't capture.
+   - **Otherwise** (Tab 2 hasn't been used yet this session, its file
+     didn't match the known template, or it simply doesn't cover that
+     particular line), Tab 1's own value is used, exactly as before.
+   - A green banner on Tab 3's results lists exactly which Sewing Lines
+     got their target from Tab 2 in that run, so it's never a silent
+     change.
+   - **Matching a Tab 1 Sewing Line (e.g. "VSEW012") to a row in Tab 2's
+     WIP data** happens purely via the WIP report's own **"Sewing Line
+     Code"** column — extracted directly from column A of the source file
+     (now shown in Tab 2's table too), keeping only values that actually
+     start with "VS". Tab 2's separate "Sewing Line" column (the Thai
+     supervisor/team name, e.g. "ราตรี") is never used for matching — a
+     row with no usable code in column A is simply skipped, falling back
+     to Tab 1's own value for that line.
 4. **Cut Plan Morning / Cut Plan Afternoon is decided per group, purely
    from the selected tables' quantities** — no wall-clock time, no user
    choice, no cross-session memory involved:

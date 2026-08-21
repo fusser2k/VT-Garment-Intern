@@ -33,6 +33,7 @@ from cutplan2 import (
     load_wip,
     write_wip_workbook,
     build_cut_plan,
+    compute_wip_target_overrides,
     recalc_cut_plan,
     lookup_table_qty,
     write_cut_plan_workbook,
@@ -57,7 +58,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-21.xlsx")
-WIP_SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "WIP_17-08-2569.xlsx")
+WIP_SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "WIP_18-08-2569.xlsx")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -284,6 +285,13 @@ def wip_upload():
     preview_df = df.head(WIP_PREVIEW_ROW_LIMIT)
     rows = preview_df.where(preview_df.notna(), "").to_dict(orient="records")
 
+    # Compute the Sewing Line -> Target for Day (with OT) override mapping
+    # right away, against the FULL df (not the possibly-truncated preview) -
+    # see compute_wip_target_overrides()/SEWING_LINE_NAME_MAP in
+    # cutplan2/model.py. Tab 3 uses this (falling back to Tab 1's own value
+    # for any line it doesn't cover) whenever this session has WIP data.
+    target_overrides = compute_wip_target_overrides(df) if structured else {}
+
     SESSIONS[sid]["wip"] = {
         "now": now_th(),
         "filename": display_filename,
@@ -294,6 +302,7 @@ def wip_upload():
         "truncated": len(df) > WIP_PREVIEW_ROW_LIMIT,
         "structured": structured,
         "download_filename": download_filename,
+        "target_overrides": target_overrides,
     }
     return _render(active_tab=2)
 
@@ -321,8 +330,17 @@ def cut_plan():
 
     run_datetime = now_th()
 
+    # If this session has WIP data (Tab 2), use its per-line "Target for Day
+    # (with OT)" as an override for Tab 1's own Sewing Target Per Day (with
+    # OT) - falls back to Tab 1's value for any Sewing Line the WIP data
+    # doesn't cover. Silently empty (no override at all) if Tab 2 hasn't
+    # been used yet this session, or its file didn't match the known
+    # template.
+    wip_session = SESSIONS[sid].get("wip")
+    wip_target_overrides = (wip_session or {}).get("target_overrides") or {}
+
     try:
-        plan_df, run_info = build_cut_plan(extraction["df"], run_datetime)
+        plan_df, run_info = build_cut_plan(extraction["df"], run_datetime, wip_target_overrides=wip_target_overrides)
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:
         flash(f"Error while building the cut plan: {e}")

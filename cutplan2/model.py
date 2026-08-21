@@ -15,6 +15,7 @@ from typing import Optional, List, Tuple
 from zoneinfo import ZoneInfo
 
 import json
+import math
 import os
 
 import pandas as pd
@@ -296,12 +297,17 @@ def run(input_path: str, output_path: str):
 
 
 WIP_HEADER_MARKER = "ไลน์เย็บ"
+# Some WIP report files use the Thai header text above; others (seen in
+# later template revisions) use the English "Sewing line" instead - accept
+# either, matched case-insensitively.
+WIP_HEADER_MARKER_VARIANTS = {WIP_HEADER_MARKER.strip().lower(), "sewing line"}
 WIP_STOP_MARKER = "ไลน์"  # marks the start of the unrelated table-status mini-table further down the sheet
 
 # Maps this WIP template's Excel column letters to friendly English field
 # names. The sheet has TWO header blocks (one per set of sewing lines) that
 # repeat the exact same column layout, so one static mapping covers both.
 WIP_COLUMN_MAP = {
+    "A": "Sewing Line Code",
     "B": "Sewing Line",
     "C": "Target Hours (OTP 100 Plan)",
     "D": "OTP Sewing Ratio",
@@ -419,7 +425,9 @@ def load_wip(path_or_buffer) -> pd.DataFrame:
     This template repeats its header row once per group of sewing lines
     (e.g. once for the individually-named lines, again for the merged
     lines like "VS02+06"). Rather than assuming a fixed row range, this
-    scans column B for the literal header text ("ไลน์เย็บ") to find where
+    scans column B for the literal header text ("ไลน์เย็บ" or, in newer
+    template revisions, the English "Sewing line" - matched
+    case-insensitively) to find where
     each block starts, and collects every non-blank row under it as data -
     so it keeps working even if a future day's file has more or fewer
     sewing lines, or an extra block.
@@ -441,7 +449,7 @@ def load_wip(path_or_buffer) -> pd.DataFrame:
         b_val = ws.cell(row=r, column=2).value
         b_str = str(b_val).strip() if b_val is not None else ""
 
-        if b_str == WIP_HEADER_MARKER:
+        if b_str.lower() in WIP_HEADER_MARKER_VARIANTS:
             collecting = True
             block_index += 1
             continue
@@ -528,6 +536,46 @@ def load_wip_raw(path_or_buffer) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Tab 3: Cut Plan
 # ---------------------------------------------------------------------------
+
+
+def compute_wip_target_overrides(wip_df: pd.DataFrame) -> dict:
+    """From an already-extracted Tab 2 WIP DataFrame (see load_wip()),
+    build {Sewing Line code: Target for Day (with OT)}.
+
+    Matched purely via the WIP report's own "Sewing Line Code" column
+    (extracted from column A of the source file, per row) - only codes
+    that actually start with "VS" are used, so any row where that column
+    is blank or holds something else (a descriptive label, a stray note,
+    etc.) is simply skipped rather than guessed at. Tab 2's separate
+    "Sewing Line" column (the Thai supervisor/team name) is not used for
+    matching at all.
+
+    Lines with no usable code, or no numeric target value, are simply
+    absent from the returned dict - callers should fall back to Tab 1's
+    own Sewing Target Per Day (with OT) for those.
+
+    Returns {} if wip_df is None, empty, or missing the expected columns
+    (e.g. an unstructured/raw-preview WIP file) - never raises.
+    """
+    if wip_df is None or len(wip_df) == 0:
+        return {}
+    if "Sewing Line Code" not in wip_df.columns or "Target for Day (with OT)" not in wip_df.columns:
+        return {}
+
+    overrides = {}
+    for _, row in wip_df.iterrows():
+        code_raw = row.get("Sewing Line Code")
+        if code_raw is None:
+            continue
+        code = str(code_raw).strip()
+        if not code or not code.upper().startswith("VS"):
+            continue
+        val = pd.to_numeric(row["Target for Day (with OT)"], errors="coerce")
+        if pd.notna(val):
+            overrides[code] = float(val)
+
+    return overrides
+
 
 CUT_PLAN_COLUMNS = [
     "Sewing Line",
@@ -628,10 +676,96 @@ def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
     return pd.DataFrame(cleaned, columns=CUT_PLAN_COLUMNS)
 
 
-def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
+def _parse_table_range(value) -> Optional[set]:
+    """Parse a 'Table No. (Mark Type 101)' restriction value such as
+    "23-47" into the set of allowed Table ID integers. Also accepts a
+    comma-separated mix of ranges and single values (e.g. "1-6, 12,
+    20-22"), stripping stray whitespace around each part. Returns None if
+    the value is blank or nothing usable could be parsed out of it -
+    meaning "no restriction", never "restrict to nothing"."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if s == "" or s.lower() == "nan":
+        return None
+    allowed = set()
+    for part in s.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "-" in part:
+            bounds = part.split("-")
+            if len(bounds) == 2:
+                try:
+                    lo = int(float(bounds[0].strip()))
+                    hi = int(float(bounds[1].strip()))
+                    if lo > hi:
+                        lo, hi = hi, lo
+                    allowed.update(range(lo, hi + 1))
+                    continue
+                except (TypeError, ValueError):
+                    pass
+        else:
+            try:
+                allowed.add(int(float(part)))
+                continue
+            except (TypeError, ValueError):
+                pass
+    return allowed or None
+
+
+def compute_mark101_table_restrictions(source_df: pd.DataFrame) -> dict:
+    """Build {(Sewing Line, JobCut - Suffix): {allowed Table ID, ...}} for
+    every JobCut whose Mark Type 101 rows carry a non-blank "Table No.
+    (Mark Type 101)" value in the source data (e.g. "23-47" - see
+    _parse_table_range()). This column is only ever filled in on a
+    JobCut's Mark Type 101 rows, so ONLY Mark Type 101 planning is ever
+    restricted by it - every other Mark Type in the same JobCut is
+    unaffected. A JobCut with no such value anywhere is simply absent from
+    the returned dict (unrestricted - every incomplete table is a
+    candidate, same as before this restriction existed)."""
+    if "Table No. (Mark Type 101)" not in source_df.columns or "Mark Type" not in source_df.columns:
+        return {}
+    mark101_rows = source_df[source_df["Mark Type"].astype(str).str.strip() == "101"]
+    restrictions = {}
+    for (sewing_line, jobcut_suffix), g in mark101_rows.groupby(["Sewing Line", "JobCut - Suffix"], dropna=False):
+        for raw in g["Table No. (Mark Type 101)"]:
+            allowed = _parse_table_range(raw)
+            if allowed:
+                restrictions[(str(sewing_line), str(jobcut_suffix))] = allowed
+                break
+    return restrictions
+
+
+def _candidate_table_pool(
+    df: pd.DataFrame,
+    wip_target_overrides: Optional[dict] = None,
+    apply_mark101_restriction: bool = True,
+) -> pd.DataFrame:
     """Shared step for build_cut_plan() and recalc_cut_plan(): drop completed
     colorway rows, then combine Qty across colorways sharing a Table ID.
-    Returns one row per (Sewing Line, JobCut - Suffix, Mark Type, Table ID)."""
+    Returns one row per (Sewing Line, JobCut - Suffix, Mark Type, Table ID).
+
+    wip_target_overrides (optional): {Sewing Line code: target value}, from
+    compute_wip_target_overrides() against Tab 2's WIP data. Where a Sewing
+    Line has an entry here, its Target comes from THAT (Tab 2's own
+    per-line "Target for Day (with OT)") instead of Tab 1's Sewing Target
+    Per Day (with OT) column - overriding it, since different sewing lines
+    can have different actual daily targets that Tab 1's extracted data
+    alone doesn't capture. Lines with no override entry keep using Tab 1's
+    value, so this degrades gracefully when Tab 2 hasn't been uploaded, or
+    doesn't cover every line.
+
+    apply_mark101_restriction (default True): when a JobCut's Mark Type
+    101 rows carry a "Table No. (Mark Type 101)" value (see
+    compute_mark101_table_restrictions()), Mark Type 101 candidates for
+    that JobCut are narrowed down to only the Table IDs within that
+    range - tables outside it are dropped from the pool entirely, so the
+    smallest-Table-ID-first selection in build_cut_plan()/recalc_cut_plan()
+    never reaches them. Pass False for a raw, unrestricted lookup (used by
+    lookup_table_qty() so a user can still manually look up/add a
+    real table even if it happens to sit outside the restricted range).
+    """
     work = df.copy()
     work["Qty"] = pd.to_numeric(work["Qty"], errors="coerce").fillna(0)
     work["Table ID"] = pd.to_numeric(work["Table ID"], errors="coerce")
@@ -654,6 +788,23 @@ def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
         )
         .reset_index()
     )
+
+    if apply_mark101_restriction:
+        restrictions = compute_mark101_table_restrictions(df)
+        if restrictions:
+            def _is_allowed(row) -> bool:
+                if str(row["Mark Type"]).strip() != "101":
+                    return True
+                allowed = restrictions.get((str(row["Sewing Line"]), str(row["JobCut - Suffix"])))
+                if allowed is None:
+                    return True
+                return pd.notna(row["Table ID"]) and int(row["Table ID"]) in allowed
+
+            table_level = table_level[table_level.apply(_is_allowed, axis=1)].reset_index(drop=True)
+
+    if wip_target_overrides:
+        override_series = table_level["Sewing Line"].map(wip_target_overrides)
+        table_level["Target"] = override_series.combine_first(table_level["Target"])
     return table_level
 
 
@@ -766,7 +917,7 @@ def compute_continuation_flags(rows) -> list:
 
 
 
-def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
+def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None, wip_target_overrides: Optional[dict] = None):
     """Build the Tab 3 cut plan from Tab 1's extracted DataFrame.
 
     Rules:
@@ -780,7 +931,19 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
       3. Within each (Sewing Line, JobCut - Suffix, Mark Type) group,
          tables are planned smallest Table ID first, adding tables in that
          order until the running combined Qty reaches (or first exceeds)
-         that group's Sewing Target Per Day.
+         that group's Sewing Target Per Day - which comes from Tab 2's WIP
+         data (its own per-line "Target for Day (with OT)") wherever
+         wip_target_overrides has an entry for that Sewing Line, and from
+         Tab 1's Sewing Target Per Day (with OT) column otherwise. See
+         compute_wip_target_overrides() for how that override mapping is
+         built and _candidate_table_pool() for exactly where it's applied.
+      3b. MARK TYPE 101 TABLE RESTRICTION
+         If a JobCut's Table No. (Mark Type 101) field has a value (e.g.
+         "23-47"), Mark Type 101 for that JobCut only draws candidates from
+         Table IDs inside that range - tables outside it are never
+         selected, even if they're incomplete and would otherwise be
+         picked. Every other Mark Type in the same JobCut is unaffected.
+         See compute_mark101_table_restrictions() and _parse_table_range().
       4. Cut Plan Morning / Cut Plan Afternoon is decided per group, from
          the selected tables' quantities alone - see split_morning_afternoon():
          a single selected table goes entirely to Morning; with more than
@@ -793,7 +956,7 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
 
     Returns (plan_df, run_info).
     """
-    table_level = _candidate_table_pool(df)
+    table_level = _candidate_table_pool(df, wip_target_overrides=wip_target_overrides)
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     # Sort candidates by Sewing Line -> JobCut - Suffix -> Mark Type -> Table ID
@@ -804,7 +967,14 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
 
     for keys, g in table_level.groupby(group_cols, sort=False, dropna=False):
         sewing_line, jobcut_suffix, mark_type = keys
-        target = g["Target"].max()
+        # Round UP to a whole number immediately - a fractional target (e.g.
+        # from a WIP override like 412.8) should never make the group look
+        # like it needs less than it actually does. Using this same rounded
+        # value for the selection cutoff below (not the raw fractional one)
+        # keeps everything downstream self-consistent: the displayed
+        # Sewing target per day, the table-selection cutoff, and Diff all
+        # agree with each other.
+        target = math.ceil(g["Target"].max())
         # Rule 3: smallest Table ID first.
         g_sorted = g.sort_values("Table ID", ascending=True).reset_index(drop=True)
 
@@ -841,9 +1011,19 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
             )
 
     plan_df = pd.DataFrame(output_rows, columns=CUT_PLAN_COLUMNS)
+    overridden_lines_in_plan = (
+        sorted(set(plan_df["Sewing Line"].unique()) & set(wip_target_overrides.keys()))
+        if wip_target_overrides
+        else []
+    )
     run_info = {
         "run_datetime": run_datetime or now_th(),
         "plan_date": (run_datetime or now_th()).date(),
+        # Which Sewing Lines in THIS plan actually got their target
+        # overridden by Tab 2's WIP data (see compute_wip_target_overrides())
+        # - purely informational, so Tab 3's UI can show the user this
+        # happened rather than silently changing numbers underneath them.
+        "wip_overridden_lines": overridden_lines_in_plan,
     }
     return plan_df, run_info
 
@@ -857,8 +1037,14 @@ def lookup_table_qty(source_df: pd.DataFrame, sewing_line: str, jobcut_suffix: s
 
     Returns the quantity (int) if that exact (Sewing Line, JobCut - Suffix,
     Mark Type, Table ID) combination exists in the source data, else None.
+
+    Deliberately unrestricted by the Mark Type 101 table-range restriction
+    (apply_mark101_restriction=False) - this is a plain "does this table
+    really exist, and what's its real quantity" lookup for when the user
+    manually types a Table No. themselves, so it should find any real
+    table regardless of whether automatic selection would have picked it.
     """
-    table_level = _candidate_table_pool(source_df)
+    table_level = _candidate_table_pool(source_df, apply_mark101_restriction=False)
     match = table_level[
         (table_level["Sewing Line"].astype(str) == str(sewing_line))
         & (table_level["JobCut - Suffix"].astype(str) == str(jobcut_suffix))
@@ -928,7 +1114,10 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
 
     for key, user_rows in rows_by_group.items():
         sewing_line, jobcut_suffix, mark_type = key
-        target = max((to_num(r.get("Sewing target per day")) for r in user_rows), default=0.0)
+        # Round UP for the same reason as build_cut_plan() - a user could
+        # type in a fractional target directly, and it should never make the
+        # group look like it needs less than it actually does.
+        target = math.ceil(max((to_num(r.get("Sewing target per day")) for r in user_rows), default=0.0))
 
         candidates = candidates_by_group.get(key)
 
@@ -1061,6 +1250,13 @@ CUT_PLAN_ASSUMPTIONS_TEXT = [
     "Table ID first. Tables are added in that order until the running combined Qty reaches (or",
     "first exceeds) the group's Sewing Target Per Day. Only the selected tables appear in the",
     "output.",
+    "",
+    "4b. MARK TYPE 101 TABLE RESTRICTION",
+    "If a JobCut's \"Table No. (Mark Type 101)\" field has a value (e.g. \"23-47\"), Mark Type 101",
+    "for that JobCut only draws candidates from Table IDs inside that range - tables outside it",
+    "are never selected, even if incomplete. Every other Mark Type in the same JobCut is",
+    "unaffected. A manually added Table No. (typed directly into a row on the Cut Plan tab) can",
+    "still be any real table, regardless of this range.",
     "",
     "5. Cut Plan Qty / Diff",
     "Cut Plan Qty = sum of combined Qty across all tables selected for that group (repeated on",

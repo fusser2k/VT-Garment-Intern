@@ -70,12 +70,6 @@ TRANSLATIONS = {
               "ที่รู้จัก (เป้าหมาย ค่าจริง ปริมาณ WIP เวลานำ และสาเหตุที่ขาดเป้า ต่อไลน์เย็บ) "
               "หากไฟล์ไม่ตรงกับเทมเพลตนั้น ระบบจะแสดงตัวอย่างข้อมูลดิบแบบไม่มีโครงสร้างแทนการแจ้งข้อผิดพลาด",
     },
-    "tab2_note": {
-        "en": "Tab 3 (Cut Planning) does not use this file yet — it's being built independently for now. "
-              "Once it's ready to factor in WIP levels, this tab can be wired in.",
-        "th": "แท็บ 3 (วางแผนการตัด) ยังไม่ได้ใช้ไฟล์นี้ — กำลังพัฒนาแยกต่างหากไปก่อน "
-              "เมื่อพร้อมนำระดับ WIP มาคำนวณแล้ว จะเชื่อมต่อกับแท็บนี้ในภายหลัง",
-    },
     "wip_file_label": {"en": "WIP file (.xlsx)", "th": "ไฟล์ WIP (.xlsx)"},
     "upload_wip_btn": {"en": "Upload WIP file", "th": "อัปโหลดไฟล์ WIP"},
     "wip_template_mismatch": {
@@ -97,17 +91,15 @@ TRANSLATIONS = {
               "Type. Completed tables are skipped. Colorways sharing the same Table ID are combined "
               "into one quantity. Tables are planned smallest Table ID first, adding tables until the "
               "running quantity reaches that Mark Type's daily sewing target. Output is split into two "
-              "tables by building, based on Sewing Line.",
+              "tables by building, based on Sewing Line. For Mark Type 101, if a JobCut's Table No. "
+              "(Mark Type 101) field has a value (e.g. \"23-47\"), only cutting tables inside that range "
+              "are used for that Mark Type — tables outside it are never selected automatically.",
         "th": "วางแผนว่าจะตัดโต๊ะไหนก่อน ตามกลุ่ม Sewing Line / JobCut - Suffix / Mark Type "
               "โต๊ะที่เสร็จแล้วจะถูกข้าม สีเดียวกันที่อยู่ในหมายเลขโต๊ะเดียวกันจะถูกรวมเป็นจำนวนเดียว "
               "จะวางแผนโต๊ะที่มีหมายเลขน้อยที่สุดก่อน แล้วเพิ่มโต๊ะไปเรื่อยๆ จนกว่าจำนวนสะสมจะถึงเป้าหมายการเย็บต่อวันของ Mark Type นั้น "
-              "ผลลัพธ์จะถูกแบ่งเป็นสองตารางตามอาคาร โดยอิงจาก Sewing Line",
-    },
-    "tab3_note": {
-        "en": "This tab is built from Tab 1's extracted data. It does not use Tab 2 (WIP Upload) yet — "
-              "that will be wired up once the WIP file's template is finalized.",
-        "th": "แท็บนี้สร้างจากข้อมูลที่ดึงจากแท็บ 1 ยังไม่ได้ใช้แท็บ 2 (อัปโหลด WIP) — "
-              "จะเชื่อมต่อกันเมื่อเทมเพลตไฟล์ WIP ได้ข้อสรุปแล้ว",
+              "ผลลัพธ์จะถูกแบ่งเป็นสองตารางตามอาคาร โดยอิงจาก Sewing Line "
+              "สำหรับ Mark Type 101 หากช่อง Table No. (Mark Type 101) ของ JobCut นั้นมีค่า (เช่น \"23-47\") "
+              "จะใช้เฉพาะโต๊ะตัดที่อยู่ในช่วงนั้นสำหรับ Mark Type นี้ — โต๊ะที่อยู่นอกช่วงจะไม่ถูกเลือกโดยอัตโนมัติ",
     },
     "generate_cut_plan_btn": {"en": "Generate cut plan", "th": "สร้างแผนการตัด"},
     "flag_notice_title": {"en": "Reminder:", "th": "ข้อควรทราบ:"},
@@ -146,6 +138,10 @@ TRANSLATIONS = {
     },
     "generated_label": {"en": "Generated", "th": "สร้างเมื่อ"},
     "table_rows_planned_total": {"en": "table row(s) planned total", "th": "แถวโต๊ะที่วางแผนทั้งหมด"},
+    "wip_override_note": {
+        "en": "Sewing Target Per Day for these Sewing Lines came from Tab 2's WIP data (not Tab 1):",
+        "th": "เป้าหมายการเย็บต่อวันของ Sewing Line เหล่านี้มาจากข้อมูล WIP ในแท็บ 2 (ไม่ใช่แท็บ 1):",
+    },
     "save_changes_btn": {"en": "Save changes & Download Excel", "th": "บันทึกการเปลี่ยนแปลง & ดาวน์โหลด Excel"},
     "table_rows_planned": {"en": "table row(s) planned", "th": "แถวโต๊ะที่วางแผน"},
     "add_row_btn": {"en": "+ Add row", "th": "+ เพิ่มแถว"},
@@ -219,6 +215,7 @@ TRANSLATIONS = {
 COLUMN_LABELS = {
     # Tab 1 (Buffer Cutting Order Form extraction)
     "Sewing Line": {"en": "Sewing Line", "th": "สายการเย็บ"},
+    "Sewing Line Code": {"en": "Sewing Line Code", "th": "รหัสสายการเย็บ"},
     "JobCut - Suffix": {"en": "JobCut - Suffix", "th": "JobCut - ต่อท้าย"},
     "Table ID": {"en": "Table ID", "th": "หมายเลขโต๊ะ"},
     "Colorway": {"en": "Colorway", "th": "สี"},
