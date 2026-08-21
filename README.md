@@ -4,7 +4,7 @@ A **new, separate** project from the original `cut_plan_model` — a fresh
 build for cut planning. It currently has three tabs, all on one page:
 
 - **Tab 1: Buffer Cutting Order Form** — upload the cutting order Excel file
-  and it's extracted into a fixed 14-field schema.
+  and it's extracted into a fixed 17-field schema.
 - **Tab 2: WIP Upload** — upload a Work-in-Process (WIP) buffer report and
   it's extracted into a fixed set of per-sewing-line fields (targets,
   actuals, WIP quantities, lead times, shortfall reasons). Falls back to a
@@ -36,13 +36,21 @@ code there (e.g. `"vi"`) to every entry, add it to `SUPPORTED_LANGS`, and
 add a corresponding button next to the EN/ไทย ones in
 `templates/index.html`'s topbar.
 
-## Tab 1: the 14 extracted fields
+## Tab 1: the 17 extracted fields
 
 ```
 Sewing Line | JobCut - Suffix | Table ID | Colorway | Mark Type | Layer |
 Qty | Qty Complete | Difference | % Complete | Status |
-Sewing Target Per Day | Table No. (Mark Type 101) | Decoration
+Sewing Target Per Day (with OT) | Sewing Target Per Day (no OT) |
+Table No. (Mark Type 101) | Decoration | FG Start Date | Start Cut
 ```
+
+**Sewing Target Per Day (no OT) is computed, not extracted from the file** —
+it's always calculated as `Sewing Target Per Day (with OT) ÷ 10.75 × 7.75`
+(scaling the with-overtime daily target down to a regular, no-overtime
+10.75h → 7.75h workday), so it never shows up in the "fields not found"
+list even if the source file has no column for it — it only ends up blank
+if the WITH-OT value it's computed from is itself missing.
 
 **Filter applied automatically:** only rows whose **Sewing Line** starts with
 `VS` are kept (e.g. `VSEW012`, `VS02+06`). Anything else (e.g. sample/test
@@ -50,7 +58,7 @@ rows like `SAMPL02`) is dropped before the data is shown or saved. The
 results banner on the page — and the title row of the downloaded workbook —
 always states how many rows were filtered out this way.
 
-The bundled sample file (`BufferCuttingOrderForm_2026-08-17.xlsx`) already
+The bundled sample file (`BufferCuttingOrderForm_2026-08-21.xlsx`) already
 uses these exact header names, so it extracts with zero missing fields. If
 you point the model at a file that uses different header text, or is missing
 some of these columns entirely, those fields are simply left blank in the
@@ -68,7 +76,7 @@ cut_plan_model_v2/
 ├── templates/
 │   └── index.html           # All 3 tabs live in this one template
 ├── sample_data/
-│   └── BufferCuttingOrderForm_2026-08-17.xlsx   # Sample input for Tab 1
+│   └── BufferCuttingOrderForm_2026-08-21.xlsx   # Sample input for Tab 1
 ├── uploads/                 # Uploaded files land here (web server mode)
 ├── outputs/                 # Generated Extracted_Data.xlsx lands here
 └── requirements.txt
@@ -186,7 +194,9 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    table before planning.
 3. Tables are planned **smallest Table ID first**, adding tables in that
    order until the running combined quantity reaches that group's
-   **Sewing Target Per Day**.
+   **Sewing Target Per Day (with OT)** — Tab 3's planning always uses the
+   with-OT figure, not the computed no-OT one (which is purely informational
+   on Tab 1).
 4. **Cut Plan Morning / Cut Plan Afternoon is decided per group, purely
    from the selected tables' quantities** — no wall-clock time, no user
    choice, no cross-session memory involved:
@@ -351,17 +361,21 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
 - **Each column has an Excel-style filter dropdown**, right under the
   headers — click **Filter ▾** to see every unique value currently in that
   column (with a count for each), check/uncheck individual values, or use
-  **Select All** / **Clear All**. Multiple columns' filters combine with AND
-  (a row must match every active filter). The button highlights blue while
-  a filter is active on that column. **Filtering is purely visual** —
-  filtered-out rows stay fully part of the data; editing, recalculating,
-  and Save changes & Download Excel always work against the complete table
-  regardless of what's currently filtered. The building's **Clear filters**
-  button resets every column's filter at once. Filters stay in effect
-  through recalculation and adding rows (a freshly rebuilt table re-applies
-  whatever's currently selected); the unique-values list itself is
-  recomputed fresh every time you open a dropdown, so it always reflects
-  what's currently in the table.
+  **Select All** / **Clear All**. A **search box** at the top of the
+  dropdown narrows the checkbox list as you type (case-insensitive partial
+  match) — handy for a long list like Sewing Line's — without touching the
+  actual table filter itself; Select All / Clear All still act on every
+  unique value regardless of what's currently searched for. Multiple
+  columns' filters combine with AND (a row must match every active filter).
+  The button highlights blue while a filter is active on that column.
+  **Filtering is purely visual** — filtered-out rows stay fully part of the
+  data; editing, recalculating, and Save changes & Download Excel always
+  work against the complete table regardless of what's currently filtered.
+  The building's **Clear filters** button resets every column's filter at
+  once. Filters stay in effect through recalculation and adding rows (a
+  freshly rebuilt table re-applies whatever's currently selected); the
+  unique-values list itself is recomputed fresh every time you open a
+  dropdown, so it always reflects what's currently in the table.
 - Nothing is saved until you click **Save changes & Download Excel** — this
   regenerates the workbook with your edits and downloads it. The workbook's
   title row is stamped "Manually edited on …" once you've saved edits, so

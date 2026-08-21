@@ -3,7 +3,7 @@ Cut Planning Model v2 — Page 1: Data Extraction
 =================================================
 This is a NEW, separate model from the original cut_plan_model project.
 Page 1's job is to correctly read an input Excel file and extract it into
-the 14-field schema below, regardless of what the source file's actual
+the 17-field schema below, regardless of what the source file's actual
 column headers happen to be.
 
 Later pages (e.g. an actual cut-planning/table-selection page) can build on
@@ -12,6 +12,7 @@ top of the DataFrame this module produces.
 
 from datetime import datetime, timedelta, date
 from typing import Optional, List, Tuple
+from zoneinfo import ZoneInfo
 
 import json
 import os
@@ -24,7 +25,30 @@ from openpyxl.utils import get_column_letter
 
 FONT_NAME = "Arial"
 
-# The 14 fields Page 1 must extract, in display order.
+# This tool is for a Thai garment manufacturer - every timestamp shown to
+# the user (extraction time, generation time, filenames' dates, etc.) should
+# reflect Thailand's local time, regardless of what timezone the SERVER
+# itself happens to be running in (most cloud hosts, including Railway,
+# default their containers to UTC). Falls back to a fixed UTC+7 offset if
+# the IANA timezone database isn't available in this environment (e.g. a
+# minimal container missing tzdata) - see requirements.txt for the tzdata
+# package that normally prevents this fallback from ever being needed.
+try:
+    TH_TZ = ZoneInfo("Asia/Bangkok")
+except Exception:
+    from datetime import timezone
+    TH_TZ = timezone(timedelta(hours=7))
+
+
+def now_th() -> datetime:
+    """Current date/time in Thailand (Asia/Bangkok, UTC+7), regardless of
+    the server's own system timezone. Use this everywhere a timestamp is
+    shown to the user or used to compute "today" - never use the bare
+    datetime.now() (server-local time) for anything user-facing."""
+    return datetime.now(TH_TZ)
+
+
+# The 17 fields Page 1 must extract/compute, in display order.
 OUTPUT_COLUMNS = [
     "Sewing Line",
     "JobCut - Suffix",
@@ -37,10 +61,18 @@ OUTPUT_COLUMNS = [
     "Difference",
     "% Complete",
     "Status",
-    "Sewing Target Per Day",
+    "Sewing Target Per Day (with OT)",
+    "Sewing Target Per Day (no OT)",
     "Table No. (Mark Type 101)",
     "Decoration",
+    "FG Start Date",
+    "Start Cut",
 ]
+
+# Columns in OUTPUT_COLUMNS that are always COMPUTED from another extracted
+# column rather than read/aliased from the source file - never counted as
+# "missing" on their own, since they don't come from the file at all.
+COMPUTED_COLUMNS = ["Sewing Target Per Day (no OT)"]
 
 # Direct aliases: source header -> one of the OUTPUT_COLUMNS above.
 # Add more entries here as real production files use different header text.
@@ -59,10 +91,13 @@ DIRECT_ALIASES = {
     "Difference": "Difference",
     "% Complete": "% Complete",
     "Status": "Status",
-    "Sewing Target Per Day": "Sewing Target Per Day",
-    "Sewing target per day": "Sewing Target Per Day",
+    "Sewing Target Per Day (with OT)": "Sewing Target Per Day (with OT)",
+    "Sewing Target Per Day": "Sewing Target Per Day (with OT)",
+    "Sewing target per day": "Sewing Target Per Day (with OT)",
     "Table No. (Mark Type 101)": "Table No. (Mark Type 101)",
     "Decoration": "Decoration",
+    "FG Start Date": "FG Start Date",
+    "Start Cut": "Start Cut",
 }
 
 # Columns that, together, can build "JobCut - Suffix" when the source file
@@ -75,7 +110,7 @@ def load_input(path_or_buffer) -> Tuple[pd.DataFrame, List[str], int]:
     """Read an input Excel file and extract it into the OUTPUT_COLUMNS schema.
 
     Unlike a strict schema check, this does NOT raise an error if some of
-    the 14 fields aren't present in the source file — those fields are
+    the 17 fields aren't present in the source file — those fields are
     simply returned blank, and their names are included in the returned
     `missing_columns` list so the caller (web page / CLI) can tell the user
     which fields the source file didn't provide.
@@ -111,10 +146,11 @@ def load_input(path_or_buffer) -> Tuple[pd.DataFrame, List[str], int]:
             extracted["JobCut - Suffix"] = pd.Series([""] * n)
             missing_columns.append("JobCut - Suffix")
 
-    # --- Everything else: direct alias lookup ---
+    # --- Everything else: direct alias lookup (skip computed columns -
+    # those are filled in afterward, not read from the source file at all) ---
     for target_col in OUTPUT_COLUMNS:
-        if target_col == "JobCut - Suffix":
-            continue  # handled above
+        if target_col == "JobCut - Suffix" or target_col in COMPUTED_COLUMNS:
+            continue
 
         source_col = next(
             (src for src, tgt in DIRECT_ALIASES.items() if tgt == target_col and src in raw_cols),
@@ -125,6 +161,17 @@ def load_input(path_or_buffer) -> Tuple[pd.DataFrame, List[str], int]:
         else:
             extracted[target_col] = pd.Series([None] * n)
             missing_columns.append(target_col)
+
+    # --- Computed columns ---
+    # Sewing Target Per Day (no OT) = Sewing Target Per Day (with OT) scaled
+    # down from a 10.75-hour (with overtime) workday to a 7.75-hour (regular,
+    # no overtime) workday. Not counted as "missing" even when the source
+    # file lacks a column for it, since it's never meant to come from the
+    # file - only ends up blank if the WITH-OT value it's computed from is
+    # itself missing/non-numeric.
+    with_ot_numeric = pd.to_numeric(extracted["Sewing Target Per Day (with OT)"], errors="coerce")
+    no_ot = with_ot_numeric / 10.75 * 7.75
+    extracted["Sewing Target Per Day (no OT)"] = no_ot.round().astype("Int64")
 
     df = pd.DataFrame(extracted, columns=OUTPUT_COLUMNS)
 
@@ -150,7 +197,7 @@ def write_extracted_workbook(
 ) -> None:
     """Write the formatted Page 1 output workbook: Extracted Data + a
     Column Mapping Notes sheet documenting what was / wasn't found."""
-    generated_at = generated_at or datetime.now()
+    generated_at = generated_at or now_th()
 
     wb = Workbook()
 
@@ -197,7 +244,7 @@ def write_extracted_workbook(
             c.alignment = center
             c.border = border
 
-    widths = [12, 16, 10, 12, 10, 8, 8, 12, 11, 11, 10, 18, 20, 12]
+    widths = [12, 16, 10, 12, 10, 8, 8, 12, 11, 11, 10, 20, 20, 20, 12, 14, 14]
     for j, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(j)].width = w
 
@@ -429,7 +476,7 @@ def get_column_letter_index(letter: str) -> int:
 
 def write_wip_workbook(df: pd.DataFrame, output_path: str, generated_at: Optional[datetime] = None) -> None:
     """Write a formatted, downloadable version of the extracted WIP data."""
-    generated_at = generated_at or datetime.now()
+    generated_at = generated_at or now_th()
     wb = Workbook()
     ws = wb.active
     ws.title = "WIP Data"
@@ -588,7 +635,9 @@ def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
     work = df.copy()
     work["Qty"] = pd.to_numeric(work["Qty"], errors="coerce").fillna(0)
     work["Table ID"] = pd.to_numeric(work["Table ID"], errors="coerce")
-    work["Sewing Target Per Day"] = pd.to_numeric(work["Sewing Target Per Day"], errors="coerce").fillna(0)
+    work["Sewing Target Per Day (with OT)"] = pd.to_numeric(
+        work["Sewing Target Per Day (with OT)"], errors="coerce"
+    ).fillna(0)
 
     status_norm = work["Status"].astype(str).str.strip().str.lower()
     work = work[status_norm != "completed"]
@@ -598,7 +647,11 @@ def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
 
     table_level = (
         work.groupby(table_cols, dropna=False)
-        .agg(Combined_Qty=("Qty", "sum"), Colorway_Count=("Colorway", "nunique"), Target=("Sewing Target Per Day", "max"))
+        .agg(
+            Combined_Qty=("Qty", "sum"),
+            Colorway_Count=("Colorway", "nunique"),
+            Target=("Sewing Target Per Day (with OT)", "max"),
+        )
         .reset_index()
     )
     return table_level
@@ -789,8 +842,8 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None):
 
     plan_df = pd.DataFrame(output_rows, columns=CUT_PLAN_COLUMNS)
     run_info = {
-        "run_datetime": run_datetime or datetime.now(),
-        "plan_date": (run_datetime or datetime.now()).date(),
+        "run_datetime": run_datetime or now_th(),
+        "plan_date": (run_datetime or now_th()).date(),
     }
     return plan_df, run_info
 

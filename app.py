@@ -2,7 +2,7 @@
 Cut Planning Model v2 — local web server
 ==========================================
 Three tabs:
-  Tab 1: Buffer Cutting Order Form  — upload + extract into the 14-field schema
+  Tab 1: Buffer Cutting Order Form  — upload + extract into the 17-field schema
   Tab 2: WIP Upload                 — upload a Work-in-Process file (no fixed
                                        template yet, so this just stores/previews it)
   Tab 3: Cut Plan                   — plans which (incomplete) tables to cut
@@ -21,7 +21,6 @@ Then open http://127.0.0.1:5001 (see README.md for local-network access).
 import os
 import traceback
 import uuid
-from datetime import datetime
 
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
 
@@ -29,6 +28,7 @@ from cutplan2 import (
     load_input,
     write_extracted_workbook,
     OUTPUT_COLUMNS,
+    now_th,
     load_wip_raw,
     load_wip,
     write_wip_workbook,
@@ -56,7 +56,7 @@ from cutplan2 import (
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
-SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-17.xlsx")
+SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-21.xlsx")
 WIP_SAMPLE_FILE = os.path.join(BASE_DIR, "sample_data", "WIP_17-08-2569.xlsx")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
@@ -154,7 +154,7 @@ def _render(active_tab: int):
     lang = _get_lang()
     return render_template(
         "index.html",
-        now=datetime.now(),
+        now=now_th(),
         active_tab=active_tab,
         extraction=state["extraction"],
         wip=state["wip"],
@@ -197,7 +197,7 @@ def extract():
         flash(translate("please_choose_input_file", _get_lang()))
         return redirect(url_for("index", tab=1))
 
-    run_datetime = datetime.now()
+    run_datetime = now_th()
 
     try:
         df, missing_columns, filtered_out_count = load_input(input_path)
@@ -285,7 +285,7 @@ def wip_upload():
     rows = preview_df.where(preview_df.notna(), "").to_dict(orient="records")
 
     SESSIONS[sid]["wip"] = {
-        "now": datetime.now(),
+        "now": now_th(),
         "filename": display_filename,
         "columns": list(df.columns),
         "rows": rows,
@@ -319,7 +319,7 @@ def cut_plan():
         flash(translate("run_tab1_first", _get_lang()))
         return redirect(url_for("index", tab=3))
 
-    run_datetime = datetime.now()
+    run_datetime = now_th()
 
     try:
         plan_df, run_info = build_cut_plan(extraction["df"], run_datetime)
@@ -434,7 +434,7 @@ def update_cut_plan(job_id):
 
     try:
         edited_plan_df = rows_to_cutplan_dataframe(rows)
-        edited_at = datetime.now()
+        edited_at = now_th()
         by_building = split_plan_by_building(edited_plan_df)
 
         building_paths = {}
@@ -485,7 +485,7 @@ def download_cutplan_file(job_id, building_key):
         flash("That file is no longer available — please save again.")
         return redirect(url_for("index", tab=3))
 
-    download_name = f"{building_key_full} of {datetime.now().date().isoformat()}.xlsx"
+    download_name = f"{building_key_full} of {now_th().date().isoformat()}.xlsx"
     return send_file(output_path, as_attachment=True, download_name=download_name)
 
 

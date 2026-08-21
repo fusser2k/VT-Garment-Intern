@@ -12,7 +12,7 @@ import sys
 from cutplan2 import run
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_INPUT = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-17.xlsx")
+DEFAULT_INPUT = os.path.join(BASE_DIR, "sample_data", "BufferCuttingOrderForm_2026-08-21.xlsx")
 DEFAULT_OUTPUT = os.path.join(BASE_DIR, "outputs", "Extracted_Data.xlsx")
 
 if __name__ == "__main__":
@@ -30,6 +30,6 @@ if __name__ == "__main__":
     if missing_columns:
         print(f"Fields not found in input (left blank): {missing_columns}")
     else:
-        print("All 14 fields were found in the input file.")
+        print(f"All {len(df.columns)} fields were found in the input file.")
     print()
     print(df.head(20).to_string(index=False))

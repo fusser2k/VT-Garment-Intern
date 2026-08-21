@@ -30,13 +30,13 @@ TRANSLATIONS = {
 
     # ---- Tab 1 ----
     "tab1_desc": {
-        "en": "Upload the Buffer Cutting Order Form Excel file and it's extracted into the 14-field "
+        "en": "Upload the Buffer Cutting Order Form Excel file and it's extracted into the 17-field "
               "schema below, right on this tab. Only rows whose Sewing Line starts with VS are kept — "
-              "everything else is filtered out automatically. If the file is missing any of the 14 "
+              "everything else is filtered out automatically. If the file is missing any of the 17 "
               "fields, that field is simply left blank in the extracted output.",
-        "th": "อัปโหลดไฟล์ Excel ใบสั่งตัดบัฟเฟอร์ ระบบจะดึงข้อมูลลงในแบบฟอร์ม 14 ช่องด้านล่างในแท็บนี้เลย "
+        "th": "อัปโหลดไฟล์ Excel ใบสั่งตัดบัฟเฟอร์ ระบบจะดึงข้อมูลลงในแบบฟอร์ม 17 ช่องด้านล่างในแท็บนี้เลย "
               "จะเก็บเฉพาะแถวที่ Sewing Line ขึ้นต้นด้วย VS เท่านั้น ส่วนที่เหลือจะถูกกรองออกโดยอัตโนมัติ "
-              "หากไฟล์ขาดข้อมูลในช่องใดช่องหนึ่งจาก 14 ช่อง ช่องนั้นจะถูกปล่อยว่างในผลลัพธ์ที่ดึงออกมา",
+              "หากไฟล์ขาดข้อมูลในช่องใดช่องหนึ่งจาก 17 ช่อง ช่องนั้นจะถูกปล่อยว่างในผลลัพธ์ที่ดึงออกมา",
     },
     "tab1_file_label": {"en": "Buffer Cutting Order Form (.xlsx)", "th": "ไฟล์ใบสั่งตัดบัฟเฟอร์ (.xlsx)"},
     "use_sample_data": {"en": "Use sample data", "th": "ใช้ข้อมูลตัวอย่าง"},
@@ -53,7 +53,7 @@ TRANSLATIONS = {
         "en": 'row(s) filtered out (Sewing Line not starting with "VS")',
         "th": 'แถวที่ถูกกรองออก (Sewing Line ไม่ได้ขึ้นต้นด้วย "VS")',
     },
-    "all_fields_found": {"en": "all 14 fields found", "th": "พบครบทั้ง 14 ช่อง"},
+    "all_fields_found": {"en": "all 17 fields found", "th": "พบครบทั้ง 17 ช่อง"},
     "download_excel": {"en": "Download Excel", "th": "ดาวน์โหลด Excel"},
     "no_rows_extracted": {
         "en": "No rows were extracted from this input file (after filtering).",
@@ -206,6 +206,8 @@ TRANSLATIONS = {
     "js_filter_select_all": {"en": "Select All", "th": "เลือกทั้งหมด"},
     "js_filter_clear_all": {"en": "Clear All", "th": "ล้างทั้งหมด"},
     "js_filter_no_values": {"en": "No values", "th": "ไม่มีค่า"},
+    "js_filter_search_placeholder": {"en": "Search values\u2026", "th": "ค้นหาค่า\u2026"},
+    "js_filter_no_matches": {"en": "No matching values", "th": "ไม่พบค่าที่ตรงกัน"},
     "js_filter_blank_value": {"en": "(Blanks)", "th": "(ว่าง)"},
     "js_dismiss_notice": {"en": "Dismiss this notice", "th": "ปิดข้อความนี้"},
     "js_dismiss_flag": {"en": "Dismiss this flag", "th": "ปิดป้ายนี้"},
@@ -227,9 +229,12 @@ COLUMN_LABELS = {
     "Difference": {"en": "Difference", "th": "ส่วนต่าง"},
     "% Complete": {"en": "% Complete", "th": "% เสร็จสิ้น"},
     "Status": {"en": "Status", "th": "สถานะ"},
-    "Sewing Target Per Day": {"en": "Sewing Target Per Day", "th": "เป้าหมายการเย็บต่อวัน"},
+    "Sewing Target Per Day (with OT)": {"en": "Sewing Target Per Day (with OT)", "th": "เป้าหมายการเย็บต่อวัน (รวม OT)"},
+    "Sewing Target Per Day (no OT)": {"en": "Sewing Target Per Day (no OT)", "th": "เป้าหมายการเย็บต่อวัน (ไม่รวม OT)"},
     "Table No. (Mark Type 101)": {"en": "Table No. (Mark Type 101)", "th": "หมายเลขโต๊ะ (Mark Type 101)"},
     "Decoration": {"en": "Decoration", "th": "การปัก/ตกแต่ง"},
+    "FG Start Date": {"en": "FG Start Date", "th": "วันที่เริ่ม FG"},
+    "Start Cut": {"en": "Start Cut", "th": "วันที่เริ่มตัด"},
 
     # Tab 3 (Cut Plan)
     "Sewing target per day": {"en": "Sewing target per day", "th": "เป้าหมายการเย็บต่อวัน"},
