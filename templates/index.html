@@ -207,9 +207,7 @@
           <span class="filtered-count" id="extraction-filtered-count"></span>
         </div>
         <div class="toolbar">
-          {% if extraction.rows %}
-          <button type="button" class="btn btn-link-small" id="extraction-clear-filters-btn">{{ t('clear_filters_btn') }}</button>
-          {% endif %}
+          <button type="button" class="btn btn-link-small clear-filters-btn" data-tbody-id="extraction-tbody">{{ t('clear_filters_btn') }}</button>
           <a class="download-btn" href="{{ url_for('download', filename=extraction.download_filename) }}">{{ t('download_excel') }}</a>
         </div>
       </div>
@@ -226,10 +224,10 @@
                 <th>{{ col_label(col) }}</th>
               {% endfor %}
             </tr>
-            <tr class="filter-row" data-tablekey="extraction">
+            <tr class="filter-row" data-tbody-id="extraction-tbody" data-count-id="extraction-filtered-count">
               {% for col in extraction.columns %}
                 <th>
-                  <button type="button" class="col-filter-btn" data-tablekey="extraction" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
+                  <button type="button" class="col-filter-btn" data-tbody-id="extraction-tbody" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
                 </th>
               {% endfor %}
             </tr>
@@ -239,7 +237,7 @@
               <tr>
                 {% for col in extraction.columns %}
                   {% if col == 'Status' %}
-                    <td data-col="{{ col }}" class="status-{{ row[col] | replace(' ', '') }}">{{ row[col] }}</td>
+                    <td class="status-{{ row[col] | replace(' ', '') }}" data-col="{{ col }}">{{ row[col] }}</td>
                   {% else %}
                     <td data-col="{{ col }}">{{ row[col] }}</td>
                   {% endif %}
@@ -291,9 +289,7 @@
           <span class="filtered-count" id="wip-filtered-count"></span>
         </div>
         <div class="toolbar">
-          {% if wip.rows %}
-          <button type="button" class="btn btn-link-small" id="wip-clear-filters-btn">{{ t('clear_filters_btn') }}</button>
-          {% endif %}
+          <button type="button" class="btn btn-link-small clear-filters-btn" data-tbody-id="wip-tbody">{{ t('clear_filters_btn') }}</button>
           {% if wip.download_filename %}
           <a class="download-btn" href="{{ url_for('download_wip', filename=wip.download_filename) }}">{{ t('download_excel') }}</a>
           {% endif %}
@@ -312,10 +308,10 @@
                 <th>{{ col_label(col) }}</th>
               {% endfor %}
             </tr>
-            <tr class="filter-row" data-tablekey="wip">
+            <tr class="filter-row" data-tbody-id="wip-tbody" data-count-id="wip-filtered-count">
               {% for col in wip.columns %}
                 <th>
-                  <button type="button" class="col-filter-btn" data-tablekey="wip" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
+                  <button type="button" class="col-filter-btn" data-tbody-id="wip-tbody" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
                 </th>
               {% endfor %}
             </tr>
@@ -405,14 +401,11 @@
         <span class="filtered-count" id="cutplan-filtered-count-{{ building_key }}"></span>
       </div>
       <div class="toolbar">
-        <button type="button" class="btn btn-link-small cutplan-clear-filters-btn" data-building="{{ building_key }}">{{ t('clear_filters_btn') }}</button>
+        <button type="button" class="btn btn-link-small clear-filters-btn" data-tbody-id="cutplan-tbody-{{ building_key }}">{{ t('clear_filters_btn') }}</button>
         <button type="button" class="btn btn-secondary cutplan-add-row-btn" data-building="{{ building_key }}">{{ t('add_row_btn') }}</button>
       </div>
     </div>
     {% if building_data.rows %}
-    <div class="global-search-row">
-      <input type="text" class="global-search-input cutplan-search" id="cutplan-search-{{ building_key }}" data-building="{{ building_key }}" placeholder="{{ t('search_placeholder') }}">
-    </div>
     <div class="table-wrap">
       <table id="cutplan-table-{{ building_key }}">
         <thead>
@@ -422,10 +415,10 @@
             {% endfor %}
             <th></th>
           </tr>
-          <tr class="filter-row" data-building="{{ building_key }}">
+          <tr class="filter-row" data-tbody-id="cutplan-tbody-{{ building_key }}" data-count-id="cutplan-filtered-count-{{ building_key }}">
             {% for col in cutplan.columns %}
               <th>
-                <button type="button" class="col-filter-btn" data-building="{{ building_key }}" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
+                <button type="button" class="col-filter-btn" data-tbody-id="cutplan-tbody-{{ building_key }}" data-col="{{ col }}" tabindex="-1">{{ t('filter_btn_label') }}</button>
               </th>
             {% endfor %}
             <th></th>
@@ -505,289 +498,30 @@
       });
     });
 
-    // JS translation bundle, shared by every script block on this page.
-    const T = {{ js_t | tojson }};
-
-    // ---- Tab 1 / Tab 2: Excel-style per-column filters, combined with each
-    // table's free-text search box. A row is visible only when it matches
-    // BOTH the typed search text (any column) AND every active column
-    // filter (checkbox list). Purely a VIEW concern (row display only) -
-    // never touches the underlying data or the download.
-    (function () {
-      const FILTER_STATE = {}; // { [tableKey]: { [col]: Set<excludedValue> } }
-
-      function cellText(tr, col) {
-        const td = tr.querySelector(`td[data-col="${col}"]`);
-        return td ? td.textContent.trim() : "";
-      }
-
-      function excludedSet(tableKey, col) {
-        if (!FILTER_STATE[tableKey]) FILTER_STATE[tableKey] = {};
-        if (!FILTER_STATE[tableKey][col]) FILTER_STATE[tableKey][col] = new Set();
-        return FILTER_STATE[tableKey][col];
-      }
-
-      function closeOpenDropdown() {
-        document.querySelectorAll(".col-filter-dropdown").forEach((el) => el.remove());
-        document.removeEventListener("mousedown", handleOutsideClick, true);
-        window.removeEventListener("scroll", handleScrollWhileOpen, true);
-      }
-      function handleOutsideClick(e) {
-        if (!e.target.closest(".col-filter-dropdown") && !e.target.closest(".col-filter-btn")) {
-          closeOpenDropdown();
-        }
-      }
-      function handleScrollWhileOpen(e) {
-        if (e.target && e.target.closest && e.target.closest(".col-filter-dropdown")) return;
-        closeOpenDropdown();
-      }
-
-      function setupTable(tableKey, tbodyId, searchInputId, filteredCountId, clearBtnId) {
-        const tbody = document.getElementById(tbodyId);
-        if (!tbody) return;
-        const searchInput = document.getElementById(searchInputId);
-        const filteredCountEl = document.getElementById(filteredCountId);
-        const clearBtn = document.getElementById(clearBtnId);
-        const filterRow = document.querySelector(`tr.filter-row[data-tablekey="${tableKey}"]`);
-
-        function apply() {
-          const needle = searchInput ? searchInput.value.trim().toLowerCase() : "";
-          const state = FILTER_STATE[tableKey] || {};
-          const activeCols = Object.keys(state).filter((col) => state[col] && state[col].size > 0);
-          let shownCount = 0;
-          Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
-            const matchesSearch = needle === "" || tr.textContent.toLowerCase().includes(needle);
-            const matchesFilters = activeCols.every((col) => !state[col].has(cellText(tr, col)));
-            const visible = matchesSearch && matchesFilters;
-            tr.style.display = visible ? "" : "none";
-            if (visible) shownCount++;
-          });
-          if (filteredCountEl) {
-            filteredCountEl.textContent = (activeCols.length > 0 || needle !== "")
-              ? `(${shownCount} ${T.rows_shown_of_total})` : "";
-          }
-          if (filterRow) {
-            filterRow.querySelectorAll(".col-filter-btn").forEach((btn) => {
-              btn.classList.toggle("filter-active", activeCols.includes(btn.dataset.col));
-            });
-          }
-        }
-
-        if (searchInput) searchInput.addEventListener("input", apply);
-
-        if (filterRow) {
-          filterRow.querySelectorAll(".col-filter-btn").forEach((btn) => {
-            btn.addEventListener("click", (e) => {
-              e.stopPropagation();
-              const col = btn.dataset.col;
-              const alreadyOpenForThisBtn = document.querySelector(".col-filter-dropdown") && btn.classList.contains("filter-dropdown-owner");
-              document.querySelectorAll(".col-filter-btn").forEach((b) => b.classList.remove("filter-dropdown-owner"));
-              if (alreadyOpenForThisBtn) {
-                closeOpenDropdown();
-              } else {
-                btn.classList.add("filter-dropdown-owner");
-                openDropdown(tableKey, tbody, col, btn, apply);
-              }
-            });
-          });
-        }
-
-        if (clearBtn) {
-          clearBtn.addEventListener("click", () => {
-            if (FILTER_STATE[tableKey]) {
-              Object.keys(FILTER_STATE[tableKey]).forEach((col) => FILTER_STATE[tableKey][col].clear());
-            }
-            if (searchInput) searchInput.value = "";
-            closeOpenDropdown();
-            apply();
-          });
-        }
-      }
-
-      function openDropdown(tableKey, tbody, col, triggerBtn, onChangeApply) {
-        closeOpenDropdown();
-
-        const counts = new Map();
+    // ---- Simple global search for Tab 1 / Tab 2's read-only tables: hides
+    // rows where NO cell's text matches the typed search (case-insensitive
+    // substring), across every column at once. ----
+    function wireGlobalSearch(inputId, tbodyId) {
+      const input = document.getElementById(inputId);
+      const tbody = document.getElementById(tbodyId);
+      if (!input || !tbody) return;
+      input.addEventListener("input", () => {
+        const needle = input.value.trim().toLowerCase();
         Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
-          const v = cellText(tr, col);
-          counts.set(v, (counts.get(v) || 0) + 1);
+          const matches = needle === "" || tr.textContent.toLowerCase().includes(needle);
+          tr.style.display = matches ? "" : "none";
         });
-        const uniqueValues = Array.from(counts.keys()).sort((a, b) => {
-          const na = parseFloat(a), nb = parseFloat(b);
-          if (!isNaN(na) && !isNaN(nb) && na !== nb) return na - nb;
-          return a.localeCompare(b);
-        });
-        const excluded = excludedSet(tableKey, col);
+      });
+    }
+    wireGlobalSearch("extraction-search", "extraction-tbody");
+    wireGlobalSearch("wip-search", "wip-tbody");
 
-        const dropdown = document.createElement("div");
-        dropdown.className = "col-filter-dropdown";
-
-        const actions = document.createElement("div");
-        actions.className = "col-filter-actions";
-        const selectAllBtn = document.createElement("button");
-        selectAllBtn.type = "button";
-        selectAllBtn.textContent = T.filter_select_all;
-        const clearAllBtn = document.createElement("button");
-        clearAllBtn.type = "button";
-        clearAllBtn.textContent = T.filter_clear_all;
-        actions.appendChild(selectAllBtn);
-        actions.appendChild(clearAllBtn);
-        dropdown.appendChild(actions);
-
-        const searchWrap = document.createElement("div");
-        searchWrap.className = "col-filter-search-wrap";
-        const searchInput = document.createElement("input");
-        searchInput.type = "text";
-        searchInput.className = "col-filter-search";
-        searchInput.placeholder = T.filter_search_placeholder;
-        searchWrap.appendChild(searchInput);
-        dropdown.appendChild(searchWrap);
-
-        const list = document.createElement("div");
-        list.className = "col-filter-list";
-
-        const noMatches = document.createElement("div");
-        noMatches.className = "col-filter-empty col-filter-no-matches";
-        noMatches.textContent = T.filter_no_matches;
-        noMatches.style.display = "none";
-
-        if (uniqueValues.length === 0) {
-          const empty = document.createElement("div");
-          empty.className = "col-filter-empty";
-          empty.textContent = T.filter_no_values;
-          list.appendChild(empty);
-          searchWrap.style.display = "none";
-        } else {
-          uniqueValues.forEach((value, idx) => {
-            const item = document.createElement("div");
-            item.className = "col-filter-item";
-            const displayText = value === "" ? T.filter_blank_value : value;
-            item.dataset.searchText = displayText.toLowerCase();
-            const checkboxId = `simplefilter-${tableKey}-${col.replace(/[^a-zA-Z0-9]/g, "")}-${idx}`;
-            const checkbox = document.createElement("input");
-            checkbox.type = "checkbox";
-            checkbox.id = checkboxId;
-            checkbox.checked = !excluded.has(value);
-            checkbox.addEventListener("change", () => {
-              if (checkbox.checked) excluded.delete(value);
-              else excluded.add(value);
-              onChangeApply();
-            });
-            const label = document.createElement("label");
-            label.setAttribute("for", checkboxId);
-            label.textContent = displayText;
-            const count = document.createElement("span");
-            count.className = "count";
-            count.textContent = counts.get(value);
-            item.appendChild(checkbox);
-            item.appendChild(label);
-            item.appendChild(count);
-            list.appendChild(item);
-          });
-          list.appendChild(noMatches);
-        }
-        dropdown.appendChild(list);
-
-        searchInput.addEventListener("input", () => {
-          const needle = searchInput.value.trim().toLowerCase();
-          let anyVisible = false;
-          list.querySelectorAll(".col-filter-item").forEach((item) => {
-            const matches = needle === "" || item.dataset.searchText.includes(needle);
-            item.style.display = matches ? "" : "none";
-            if (matches) anyVisible = true;
-          });
-          noMatches.style.display = anyVisible ? "none" : "";
-        });
-
-        selectAllBtn.addEventListener("click", () => {
-          excluded.clear();
-          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
-          onChangeApply();
-        });
-        clearAllBtn.addEventListener("click", () => {
-          uniqueValues.forEach((v) => excluded.add(v));
-          list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
-          onChangeApply();
-        });
-
-        document.body.appendChild(dropdown);
-        searchInput.focus();
-
-        const rect = triggerBtn.getBoundingClientRect();
-        const dropdownWidth = dropdown.offsetWidth || 220;
-        let left = rect.left;
-        if (left + dropdownWidth > window.innerWidth - 8) {
-          left = Math.max(8, window.innerWidth - dropdownWidth - 8);
-        }
-        dropdown.style.top = `${rect.bottom + 4}px`;
-        dropdown.style.left = `${left}px`;
-
-        setTimeout(() => document.addEventListener("mousedown", handleOutsideClick, true), 0);
-        window.addEventListener("scroll", handleScrollWhileOpen, true);
-      }
-
-      setupTable("extraction", "extraction-tbody", "extraction-search", "extraction-filtered-count", "extraction-clear-filters-btn");
-      setupTable("wip", "wip-tbody", "wip-search", "wip-filtered-count", "wip-clear-filters-btn");
-    })();
-
-    // ---- Tab 3: Cut Plan — editable tables (Building 1 / Building 2 / Unassigned) ----
-    (function () {
-      const allTbodies = Array.from(document.querySelectorAll(".cutplan-tbody"));
-      if (allTbodies.length === 0) return; // no cut plan generated yet on this page load
-
-      const JOB_ID = {{ (cutplan.job_id if cutplan else "") | tojson }};
-      const COLUMNS = {{ (cutplan.columns if cutplan else []) | tojson }};
-      const GROUP_COLS = ["Sewing Line", "JobCut - Suffix", "Mark Type"];
-      const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"];
-      const NUMERIC_COLS = ["Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"];
-      const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
-      const BUILDING_1_LINES = {{ building_1_lines | tojson }};
-      const BUILDING_2_LINES = {{ building_2_lines | tojson }};
-      // Translated strings for JS-driven status text/tooltips, in the
-      // CURRENT session's language (see cutplan2/i18n.py::js_translations).
-      // Set of "Sewing Line|JobCut - Suffix" keys that have more than one
-      // Mark Type needing decoration - drives the dismissible flag badge on
-      // the JobCut - Suffix cell. Rebuilt on the initial page load; kept
-      // through client-side row rebuilds (recalculation) too.
-      const MULTI_DECORATION_KEYS = new Set({{ (cutplan.multi_decoration_keys if cutplan else []) | tojson }});
-
-      const statusEl = document.getElementById("cutplan-status-msg");
-      const totalRowCountEl = document.getElementById("cutplan-row-count-total");
-
-      function getBuildingKey(sewingLine) {
-        const s = String(sewingLine ?? "").trim();
-        if (BUILDING_1_LINES.includes(s)) return "b1";
-        if (BUILDING_2_LINES.includes(s)) return "b2";
-        return "unassigned";
-      }
-
-      function getTbody(buildingKey) {
-        return document.getElementById(`cutplan-tbody-${buildingKey}`);
-      }
-
-      // ---- Persistent baseline ("Original") values ----
-      // Captured ONCE from the freshly-generated plan on initial page load,
-      // keyed by table identity (Sewing Line + JobCut - Suffix + Mark Type +
-      // Table No.). This does NOT get overwritten by later recalculations -
-      // "Original" always means "what Generate cut plan produced," not
-      // "whatever the last recalculation happened to show."
-      const ORIGINAL_BASELINE = {};
-
-      function rowIdentityKey(getVal) {
-        return GROUP_COLS.map((c) => String(getVal(c) ?? "")).join("|") + "|" + String(getVal("Table No.") ?? "");
-      }
-
-      function captureInitialBaseline() {
-        allTbodies.forEach((tb) => {
-          Array.from(tb.querySelectorAll("tr")).forEach((tr) => {
-            const key = rowIdentityKey((c) => strVal(tr, c));
-            const entry = {};
-            COLUMNS.forEach((col) => { entry[col] = strVal(tr, col); });
-            ORIGINAL_BASELINE[key] = entry;
-          });
-        });
-      }
-
+    // ---- Shared helpers + column filtering system: used by Tab 1 and
+    // Tab 2's read-only tables AND Tab 3's editable ones, so this runs
+    // UNCONDITIONALLY (not nested inside Tab 3's own IIFE, which returns
+    // early when no cut plan has been generated yet - Tab 1/Tab 2 need to
+    // work regardless of that). ----
+    const T = {{ js_t | tojson }};
       function cellInput(tr, col) {
         const td = tr.querySelector(`td[data-col="${col}"]`);
         return td ? td.querySelector("input") : null;
@@ -799,83 +533,64 @@
       }
       function strVal(tr, col) {
         const el = cellInput(tr, col);
-        return el ? el.value : "";
+        if (el) return el.value;
+        // No <input> in this cell (Tab 1 / Tab 2's read-only tables) - fall
+        // back to the cell's plain text content, so the same filtering
+        // logic works uniformly across editable (Tab 3) and read-only
+        // (Tab 1, Tab 2) tables.
+        const td = tr.querySelector(`td[data-col="${col}"]`);
+        return td ? td.textContent.trim() : "";
       }
-      function updateRowCount(tbodyEl) {
-        const buildingKey = tbodyEl.dataset.building;
-        const el = document.getElementById(`cutplan-row-count-${buildingKey}`);
-        if (el) el.textContent = tbodyEl.querySelectorAll("tr").length;
-        if (totalRowCountEl) {
-          const total = allTbodies.reduce((sum, tb) => sum + tb.querySelectorAll("tr").length, 0);
-          totalRowCountEl.textContent = total;
-        }
-        // Filtering is a pure VIEW concern (row visibility only) - it never
-        // removes rows from the data collected for save/recalc. Re-apply
-        // whatever filters are currently typed in whenever rows change
-        // (add row, insert row, resort, or a full rebuild after
-        // recalculation), since freshly (re)built <tr> elements always
-        // start fully visible regardless of what was filtered before.
-        applyColumnFilters(buildingKey);
-      }
-
-      // ---- Column filtering (Tab 3), Excel-style: click a column's Filter
-      // button to see every UNIQUE value currently in that column, with
-      // checkboxes to show/hide specific ones, plus Select All / Clear All.
-      // Purely visual (tr.style.display) - collectAllRows() always reads
-      // every row regardless of filter state, so filtering never affects
-      // what gets saved or recalculated.
+      // ---- Column filtering, Excel-style: click a column's Filter button
+      // to see every UNIQUE value currently in that column, with checkboxes
+      // to show/hide specific ones, plus Select All / Clear All. Purely
+      // visual (tr.style.display) - collectAllRows() always reads every row
+      // regardless of filter state, so filtering never affects what gets
+      // saved or recalculated. Works uniformly across Tab 3's editable
+      // tables (Building 1/2/Unassigned) and Tab 1/Tab 2's read-only ones -
+      // every filterable table is identified by its ACTUAL tbody element
+      // id (data-tbody-id), passed through explicitly rather than derived
+      // via string templates, so each table's naming convention doesn't
+      // need to match any of the others'.
       //
-      // State: for each building+column, the set of values the user has
+      // State: for each tbody id + column, the set of values the user has
       // UNCHECKED (excluded/hidden). Empty set = no filter active for that
       // column (everything shown), matching a fresh, never-touched filter.
-      const COLUMN_FILTER_STATE = {}; // { [buildingKey]: { [col]: Set<string> } }
+      const COLUMN_FILTER_STATE = {}; // { [tbodyId]: { [col]: Set<string> } }
 
-      function getExcludedSet(buildingKey, col) {
-        if (!COLUMN_FILTER_STATE[buildingKey]) COLUMN_FILTER_STATE[buildingKey] = {};
-        if (!COLUMN_FILTER_STATE[buildingKey][col]) COLUMN_FILTER_STATE[buildingKey][col] = new Set();
-        return COLUMN_FILTER_STATE[buildingKey][col];
+      function getExcludedSet(tbodyId, col) {
+        if (!COLUMN_FILTER_STATE[tbodyId]) COLUMN_FILTER_STATE[tbodyId] = {};
+        if (!COLUMN_FILTER_STATE[tbodyId][col]) COLUMN_FILTER_STATE[tbodyId][col] = new Set();
+        return COLUMN_FILTER_STATE[tbodyId][col];
       }
 
-      function getFilterRow(buildingKey) {
-        return document.querySelector(`tr.filter-row[data-building="${buildingKey}"]`);
+      function getFilterRow(tbodyId) {
+        return document.querySelector(`tr.filter-row[data-tbody-id="${tbodyId}"]`);
       }
 
-      // Free-text search box (one per building), combined with the
-      // per-column filters below: a row is visible only when it matches
-      // BOTH the typed search text (any column) AND every active column
-      // filter, same rule as Tab 1 / Tab 2's search boxes.
-      const SEARCH_STATE = {}; // { [buildingKey]: string }
-
-      function applyColumnFilters(buildingKey) {
-        const tbodyEl = getTbody(buildingKey);
+      function applyColumnFilters(tbodyId) {
+        const tbodyEl = document.getElementById(tbodyId);
         if (!tbodyEl) return;
 
-        const state = COLUMN_FILTER_STATE[buildingKey] || {};
+        const state = COLUMN_FILTER_STATE[tbodyId] || {};
         const activeCols = Object.keys(state).filter((col) => state[col] && state[col].size > 0);
-        const needle = (SEARCH_STATE[buildingKey] || "").trim().toLowerCase();
 
         const rows = Array.from(tbodyEl.querySelectorAll("tr"));
         let shownCount = 0;
         rows.forEach((tr) => {
-          const matchesFilters = activeCols.every((col) => !state[col].has(strVal(tr, col)));
-          // Every cell here is an editable <input>, whose value never shows
-          // up in tr.textContent (inputs render no text nodes) - so the
-          // search has to read each column's actual value via strVal(),
-          // same helper the column filters already use, rather than
-          // textContent like Tab 1 / Tab 2's plain-<td> tables can.
-          const matchesSearch = needle === "" || COLUMNS.some((col) => strVal(tr, col).toLowerCase().includes(needle));
-          const matches = matchesFilters && matchesSearch;
+          const matches = activeCols.every((col) => !state[col].has(strVal(tr, col)));
           tr.style.display = matches ? "" : "none";
           if (matches) shownCount++;
         });
 
-        const filteredCountEl = document.getElementById(`cutplan-filtered-count-${buildingKey}`);
+        const filterRow = getFilterRow(tbodyId);
+        const countId = filterRow ? filterRow.dataset.countId : null;
+        const filteredCountEl = countId ? document.getElementById(countId) : null;
         if (filteredCountEl) {
-          filteredCountEl.textContent = (activeCols.length > 0 || needle !== "") ? `(${shownCount} ${T.rows_shown_of_total})` : "";
+          filteredCountEl.textContent = activeCols.length > 0 ? `(${shownCount} ${T.rows_shown_of_total})` : "";
         }
 
         // Reflect active/inactive state on each column's Filter button.
-        const filterRow = getFilterRow(buildingKey);
         if (filterRow) {
           filterRow.querySelectorAll(".col-filter-btn").forEach((btn) => {
             const col = btn.dataset.col;
@@ -906,10 +621,10 @@
         closeOpenFilterDropdown();
       }
 
-      function openFilterDropdown(buildingKey, col, triggerBtn) {
+      function openFilterDropdown(tbodyId, col, triggerBtn) {
         closeOpenFilterDropdown();
 
-        const tbodyEl = getTbody(buildingKey);
+        const tbodyEl = document.getElementById(tbodyId);
         if (!tbodyEl) return;
 
         // Collect unique values currently in this column, with counts, from
@@ -926,7 +641,7 @@
           return a.localeCompare(b);
         });
 
-        const excluded = getExcludedSet(buildingKey, col);
+        const excluded = getExcludedSet(tbodyId, col);
 
         const dropdown = document.createElement("div");
         dropdown.className = "col-filter-dropdown";
@@ -979,7 +694,7 @@
             item.className = "col-filter-item";
             const displayText = value === "" ? T.filter_blank_value : value;
             item.dataset.searchText = displayText.toLowerCase();
-            const checkboxId = `colfilter-${buildingKey}-${col.replace(/[^a-zA-Z0-9]/g, "")}-${idx}`;
+            const checkboxId = `colfilter-${tbodyId}-${col.replace(/[^a-zA-Z0-9]/g, "")}-${idx}`;
             const checkbox = document.createElement("input");
             checkbox.type = "checkbox";
             checkbox.id = checkboxId;
@@ -987,7 +702,7 @@
             checkbox.addEventListener("change", () => {
               if (checkbox.checked) excluded.delete(value);
               else excluded.add(value);
-              applyColumnFilters(buildingKey);
+              applyColumnFilters(tbodyId);
             });
             const label = document.createElement("label");
             label.setAttribute("for", checkboxId);
@@ -1018,12 +733,12 @@
         selectAllBtn.addEventListener("click", () => {
           excluded.clear();
           list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
-          applyColumnFilters(buildingKey);
+          applyColumnFilters(tbodyId);
         });
         clearAllBtn.addEventListener("click", () => {
           uniqueValues.forEach((v) => excluded.add(v));
           list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = false; });
-          applyColumnFilters(buildingKey);
+          applyColumnFilters(tbodyId);
         });
 
         document.body.appendChild(dropdown);
@@ -1048,50 +763,108 @@
         window.addEventListener("scroll", handleScrollWhileFilterOpen, true);
       }
 
-      // Scoped to Tab 3's own filter buttons only (they carry data-building;
-      // Tab 1 / Tab 2's filter buttons carry data-tablekey instead and are
-      // handled entirely by their own IIFE above). Selecting ".col-filter-btn"
-      // unscoped here used to also attach this handler to Tab 1 / Tab 2's
-      // buttons, giving each of those buttons two competing click handlers
-      // that opened and then immediately closed the dropdown - breaking
-      // filtering on Tab 1 / Tab 2.
-      document.querySelectorAll(".col-filter-btn[data-building]").forEach((btn) => {
+      document.querySelectorAll(".col-filter-btn").forEach((btn) => {
         btn.addEventListener("click", (e) => {
           e.stopPropagation();
-          const buildingKey = btn.dataset.building;
+          const tbodyId = btn.dataset.tbodyId;
           const col = btn.dataset.col;
           const alreadyOpenForThisBtn = document.querySelector(".col-filter-dropdown") && btn.classList.contains("filter-dropdown-owner");
-          document.querySelectorAll(".col-filter-btn[data-building]").forEach((b) => b.classList.remove("filter-dropdown-owner"));
+          document.querySelectorAll(".col-filter-btn").forEach((b) => b.classList.remove("filter-dropdown-owner"));
           if (alreadyOpenForThisBtn) {
             closeOpenFilterDropdown();
           } else {
             btn.classList.add("filter-dropdown-owner");
-            openFilterDropdown(buildingKey, col, btn);
+            openFilterDropdown(tbodyId, col, btn);
           }
         });
       });
 
-      document.querySelectorAll(".cutplan-search").forEach((input) => {
-        const buildingKey = input.dataset.building;
-        input.addEventListener("input", () => {
-          SEARCH_STATE[buildingKey] = input.value;
-          applyColumnFilters(buildingKey);
-        });
-      });
-
-      document.querySelectorAll(".cutplan-clear-filters-btn").forEach((btn) => {
+      document.querySelectorAll(".clear-filters-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
-          const buildingKey = btn.dataset.building;
-          if (COLUMN_FILTER_STATE[buildingKey]) {
-            Object.keys(COLUMN_FILTER_STATE[buildingKey]).forEach((col) => COLUMN_FILTER_STATE[buildingKey][col].clear());
+          const tbodyId = btn.dataset.tbodyId;
+          if (COLUMN_FILTER_STATE[tbodyId]) {
+            Object.keys(COLUMN_FILTER_STATE[tbodyId]).forEach((col) => COLUMN_FILTER_STATE[tbodyId][col].clear());
           }
-          SEARCH_STATE[buildingKey] = "";
-          const searchInput = document.getElementById(`cutplan-search-${buildingKey}`);
-          if (searchInput) searchInput.value = "";
           closeOpenFilterDropdown();
-          applyColumnFilters(buildingKey);
+          applyColumnFilters(tbodyId);
         });
       });
+    // ---- Tab 3: Cut Plan — editable tables (Building 1 / Building 2 / Unassigned) ----
+    (function () {
+      const allTbodies = Array.from(document.querySelectorAll(".cutplan-tbody"));
+      if (allTbodies.length === 0) return; // no cut plan generated yet on this page load
+
+      const JOB_ID = {{ (cutplan.job_id if cutplan else "") | tojson }};
+      const COLUMNS = {{ (cutplan.columns if cutplan else []) | tojson }};
+      const GROUP_COLS = ["Sewing Line", "JobCut - Suffix", "Mark Type"];
+      const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"];
+      const NUMERIC_COLS = ["Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"];
+      const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
+      const BUILDING_1_LINES = {{ building_1_lines | tojson }};
+      const BUILDING_2_LINES = {{ building_2_lines | tojson }};
+      // T (JS-driven status text/tooltips, in the current session's
+      // language) is now defined in the shared, unguarded block above this
+      // IIFE - still accessible here via normal closure/scope chaining.
+      // Set of "Sewing Line|JobCut - Suffix" keys that have more than one
+      // Mark Type needing decoration - drives the dismissible flag badge on
+      // the JobCut - Suffix cell. Rebuilt on the initial page load; kept
+      // through client-side row rebuilds (recalculation) too.
+      const MULTI_DECORATION_KEYS = new Set({{ (cutplan.multi_decoration_keys if cutplan else []) | tojson }});
+
+      const statusEl = document.getElementById("cutplan-status-msg");
+      const totalRowCountEl = document.getElementById("cutplan-row-count-total");
+
+      function getBuildingKey(sewingLine) {
+        const s = String(sewingLine ?? "").trim();
+        if (BUILDING_1_LINES.includes(s)) return "b1";
+        if (BUILDING_2_LINES.includes(s)) return "b2";
+        return "unassigned";
+      }
+
+      function getTbody(buildingKey) {
+        return document.getElementById(`cutplan-tbody-${buildingKey}`);
+      }
+
+      // ---- Persistent baseline ("Original") values ----
+      // Captured ONCE from the freshly-generated plan on initial page load,
+      // keyed by table identity (Sewing Line + JobCut - Suffix + Mark Type +
+      // Table No.). This does NOT get overwritten by later recalculations -
+      // "Original" always means "what Generate cut plan produced," not
+      // "whatever the last recalculation happened to show."
+      const ORIGINAL_BASELINE = {};
+
+      function rowIdentityKey(getVal) {
+        return GROUP_COLS.map((c) => String(getVal(c) ?? "")).join("|") + "|" + String(getVal("Table No.") ?? "");
+      }
+
+      function captureInitialBaseline() {
+        allTbodies.forEach((tb) => {
+          Array.from(tb.querySelectorAll("tr")).forEach((tr) => {
+            const key = rowIdentityKey((c) => strVal(tr, c));
+            const entry = {};
+            COLUMNS.forEach((col) => { entry[col] = strVal(tr, col); });
+            ORIGINAL_BASELINE[key] = entry;
+          });
+        });
+      }
+
+      function updateRowCount(tbodyEl) {
+        const buildingKey = tbodyEl.dataset.building;
+        const el = document.getElementById(`cutplan-row-count-${buildingKey}`);
+        if (el) el.textContent = tbodyEl.querySelectorAll("tr").length;
+        if (totalRowCountEl) {
+          const total = allTbodies.reduce((sum, tb) => sum + tb.querySelectorAll("tr").length, 0);
+          totalRowCountEl.textContent = total;
+        }
+        // Filtering is a pure VIEW concern (row visibility only) - it never
+        // removes rows from the data collected for save/recalc. Re-apply
+        // whatever filters are currently typed in whenever rows change
+        // (add row, insert row, resort, or a full rebuild after
+        // recalculation), since freshly (re)built <tr> elements always
+        // start fully visible regardless of what was filtered before.
+        applyColumnFilters(tbodyEl.id);
+      }
+
 
       // Build one <tr>, populated from rowData if given (server response / rebuild),
       // or blank if rowData is null (the "+ Add row" case). contFlags (optional)

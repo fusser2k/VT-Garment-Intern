@@ -10,9 +10,9 @@ build for cut planning. It currently has three tabs, all on one page:
   actuals, WIP quantities, lead times, shortfall reasons). Falls back to a
   raw, no-schema preview for a file that doesn't match the known template.
 - **Tab 3: Cut Plan** — plans which cutting tables to work on first, using
-  Tab 1's extracted data. **Not wired to Tab 2 yet** — it's being built
-  independently for now. Once it's ready to factor in WIP levels, this tab
-  can be wired in.
+  Tab 1's extracted data. If Tab 2's WIP data has been uploaded this
+  session, its per-line target overrides Tab 1's own value wherever it
+  covers a given Sewing Line (see below).
 
 Switching tabs is instant (client-side) and doesn't lose what's on the other
 tabs — upload something on Tab 1, switch to Tab 2, upload something there,
@@ -55,14 +55,20 @@ if the WITH-OT value it's computed from is itself missing.
 **Filter applied automatically:** only rows whose **Sewing Line** starts with
 `VS` are kept (e.g. `VSEW012`, `VS02+06`). Anything else (e.g. sample/test
 rows like `SAMPL02`) is dropped before the data is shown or saved. The
-results banner on the page — and the title row of the downloaded workbook —
-always states how many rows were filtered out this way.
+results banner on the page always states how many rows were filtered out
+this way — the downloaded workbook itself starts directly with the header
+row (no title/notice row above it), so it drops straight into a plain data
+table.
 
 The bundled sample file (`BufferCuttingOrderForm_2026-08-21.xlsx`) already
 uses these exact header names, so it extracts with zero missing fields. If
 you point the model at a file that uses different header text, or is missing
 some of these columns entirely, those fields are simply left blank in the
 output — the tool tells you exactly which ones.
+
+**Download Excel** downloads as `Extracted Data of <today's date>.xlsx`
+(Thailand time), matching the naming convention used for Tab 3's
+`Building N of <date>.xlsx` files.
 
 ## What's in this folder
 
@@ -116,12 +122,13 @@ from the old model, so both can run at once). Open that URL in your browser
 - **Tab 1: Buffer Cutting Order Form** — upload your input `.xlsx` (or check
   "use bundled sample data") and click **Extract data**. The extracted table
   appears right below the form, with a **search box** above it (matches
-  against any column) and a **Download Excel** button.
+  against any column), an **Excel-style filter dropdown on every column
+  header** (same as Tab 3's — see below), and a **Download Excel** button.
 - **Tab 2: WIP Upload** — upload a WIP `.xlsx` file (or check "use bundled
   sample WIP data"). It's extracted into a fixed set of fields (see below)
-  with the same **search box** and a **Download Excel** button, or falls
-  back to a raw, unmapped preview if the file doesn't match the known
-  template.
+  with the same **search box**, **column filter dropdowns**, and a
+  **Download Excel** button, or falls back to a raw, unmapped preview if
+  the file doesn't match the known template.
 - **Tab 3: Cut Plan** — click **Generate cut plan** (uses Tab 1's extracted
   data, so run Tab 1 first). The plan is shown as an **editable table** —
   adjust any cell, add/remove rows, **filter by any column** — then
@@ -310,9 +317,9 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   **Save changes & Download Excel** button at the top that gathers rows
   from **both** tables together, then downloads **one file per building** —
   e.g. `Building 1 of 2026-08-18.xlsx` and `Building 2 of 2026-08-18.xlsx` —
-  each a self-contained workbook (its own Cut Plan sheet + a Logic &
-  Assumptions sheet). Your browser may ask permission the first time a page
-  triggers more than one download at once; allow it to get both files.
+  each a self-contained workbook with just its own Cut Plan sheet. Your
+  browser may ask permission the first time a page triggers more than one
+  download at once; allow it to get both files.
 - Click into **any** cell to edit it — including **Cut Plan Qty** and
   **Diff** — quantities, table numbers, notes, even Sewing Line /
   JobCut - Suffix / Mark Type.
@@ -407,11 +414,17 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   once. Filters stay in effect through recalculation and adding rows (a
   freshly rebuilt table re-applies whatever's currently selected); the
   unique-values list itself is recomputed fresh every time you open a
-  dropdown, so it always reflects what's currently in the table.
+  dropdown, so it always reflects what's currently in the table. **The
+  exact same filter dropdowns are also available on Tab 1's and Tab 2's
+  tables** (alongside their own search box), independent of whether a cut
+  plan has even been generated — the filtering system works the same way
+  everywhere in the app, just applied to read-only tables there instead of
+  editable ones.
 - Nothing is saved until you click **Save changes & Download Excel** — this
-  regenerates the workbook with your edits and downloads it. The workbook's
-  title row is stamped "Manually edited on …" once you've saved edits, so
-  it's clear it no longer matches the automatic plan exactly.
+  regenerates the workbook with your edits and downloads it. Downloaded
+  files start directly with the header row (no title/notice rows above it,
+  and no "Manually edited on …" stamp either) — a plain data table either
+  way.
 
 Edits are held in the server's memory for the life of that session (this is
 a local single-user tool, not a hosted multi-user service). If you restart

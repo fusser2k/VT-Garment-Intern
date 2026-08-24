@@ -91,15 +91,11 @@ TRANSLATIONS = {
               "Type. Completed tables are skipped. Colorways sharing the same Table ID are combined "
               "into one quantity. Tables are planned smallest Table ID first, adding tables until the "
               "running quantity reaches that Mark Type's daily sewing target. Output is split into two "
-              "tables by building, based on Sewing Line. For Mark Type 101, if a JobCut's Table No. "
-              "(Mark Type 101) field has a value (e.g. \"23-47\"), only cutting tables inside that range "
-              "are used for that Mark Type — tables outside it are never selected automatically.",
+              "tables by building, based on Sewing Line.",
         "th": "วางแผนว่าจะตัดโต๊ะไหนก่อน ตามกลุ่ม Sewing Line / JobCut - Suffix / Mark Type "
               "โต๊ะที่เสร็จแล้วจะถูกข้าม สีเดียวกันที่อยู่ในหมายเลขโต๊ะเดียวกันจะถูกรวมเป็นจำนวนเดียว "
               "จะวางแผนโต๊ะที่มีหมายเลขน้อยที่สุดก่อน แล้วเพิ่มโต๊ะไปเรื่อยๆ จนกว่าจำนวนสะสมจะถึงเป้าหมายการเย็บต่อวันของ Mark Type นั้น "
-              "ผลลัพธ์จะถูกแบ่งเป็นสองตารางตามอาคาร โดยอิงจาก Sewing Line "
-              "สำหรับ Mark Type 101 หากช่อง Table No. (Mark Type 101) ของ JobCut นั้นมีค่า (เช่น \"23-47\") "
-              "จะใช้เฉพาะโต๊ะตัดที่อยู่ในช่วงนั้นสำหรับ Mark Type นี้ — โต๊ะที่อยู่นอกช่วงจะไม่ถูกเลือกโดยอัตโนมัติ",
+              "ผลลัพธ์จะถูกแบ่งเป็นสองตารางตามอาคาร โดยอิงจาก Sewing Line",
     },
     "generate_cut_plan_btn": {"en": "Generate cut plan", "th": "สร้างแผนการตัด"},
     "flag_notice_title": {"en": "Reminder:", "th": "ข้อควรทราบ:"},

@@ -234,7 +234,8 @@ def download(filename):
     if not os.path.exists(safe_path):
         flash("That output file is no longer available — please extract again.")
         return redirect(url_for("index", tab=1))
-    return send_file(safe_path, as_attachment=True, download_name="Extracted_Data.xlsx")
+    download_name = f"Extracted Data of {now_th().date().isoformat()}.xlsx"
+    return send_file(safe_path, as_attachment=True, download_name=download_name)
 
 
 # ---------------------------------------------------------------------------

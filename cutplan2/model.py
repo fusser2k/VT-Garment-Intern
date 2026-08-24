@@ -196,8 +196,12 @@ def write_extracted_workbook(
     generated_at: Optional[datetime] = None,
     filtered_out_count: int = 0,
 ) -> None:
-    """Write the formatted Page 1 output workbook: Extracted Data + a
-    Column Mapping Notes sheet documenting what was / wasn't found."""
+    """Write the formatted Page 1 output workbook: just the Extracted Data
+    sheet (single-sheet workbook), starting directly with the header row -
+    no title/notice row above it. missing_columns/filtered_out_count/
+    generated_at are still accepted (existing callers pass them) but no
+    longer written into the sheet itself; that information is shown in the
+    web UI's own banner instead."""
     generated_at = generated_at or now_th()
 
     wb = Workbook()
@@ -205,8 +209,6 @@ def write_extracted_workbook(
     header_fill = PatternFill("solid", fgColor="1F4E78")
     header_font = Font(name=FONT_NAME, bold=True, color="FFFFFF", size=10)
     cell_font = Font(name=FONT_NAME, size=10)
-    title_font = Font(name=FONT_NAME, size=10, bold=True, color=TITLE_FONT_COLOR)
-    warn_font = Font(name=FONT_NAME, size=10, bold=True, color=WARN_FONT_COLOR)
     thin = Side(style="thin", color="B7B7B7")
     border = Border(left=thin, right=thin, top=thin, bottom=thin)
     center = Alignment(horizontal="center", vertical="center")
@@ -215,20 +217,7 @@ def write_extracted_workbook(
     ws = wb.active
     ws.title = "Extracted Data"
 
-    title_text = f"Extracted: {generated_at.strftime('%Y-%m-%d %H:%M')}"
-    if filtered_out_count:
-        title_text += f"   |   Filtered out {filtered_out_count} row(s) whose Sewing Line did not start with \"VS\""
-    ws.cell(row=1, column=1, value=title_text).font = title_font
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(OUTPUT_COLUMNS))
-
-    header_row = 2
-    if missing_columns:
-        ws.cell(
-            row=2, column=1,
-            value=f"Fields not found in the input file (left blank): {', '.join(missing_columns)}",
-        ).font = warn_font
-        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(OUTPUT_COLUMNS))
-        header_row = 3
+    header_row = 1
 
     headers = list(df.columns)
     for j, h in enumerate(headers, start=1):
@@ -252,39 +241,6 @@ def write_extracted_workbook(
     ws.freeze_panes = f"A{header_row + 1}"
     last_row = max(len(df) + header_row, header_row)
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(len(headers))}{last_row}"
-
-    # ---- Sheet 2: Column Mapping Notes ----
-    ws2 = wb.create_sheet("Column Mapping Notes")
-    ws2.column_dimensions["A"].width = 35
-    ws2.column_dimensions["B"].width = 70
-
-    notes = [
-        ("CUT PLANNING MODEL v2 — PAGE 1: DATA EXTRACTION", ""),
-        ("", ""),
-        ("Filter applied", f"Only rows with Sewing Line starting with \"VS\" are kept. {filtered_out_count} row(s) filtered out."),
-        ("", ""),
-        ("Field", "Status"),
-    ]
-    for col in OUTPUT_COLUMNS:
-        status = "Not found in input file — left blank" if col in missing_columns else "Found and extracted"
-        notes.append((col, status))
-
-    for i, (a, b) in enumerate(notes, start=1):
-        ca = ws2.cell(row=i, column=1, value=a)
-        cb = ws2.cell(row=i, column=2, value=b)
-        if i == 1:
-            ca.font = Font(name=FONT_NAME, size=11, bold=True, color=TITLE_FONT_COLOR)
-        elif i == 3:
-            ca.font = Font(name=FONT_NAME, size=10, bold=True)
-            cb.font = cell_font
-        elif i == 5:
-            ca.font = header_font
-            cb.font = header_font
-            ca.fill = header_fill
-            cb.fill = header_fill
-        else:
-            ca.font = cell_font
-            cb.font = warn_font if "Not found" in b else cell_font
 
     wb.save(output_path)
 
@@ -676,72 +632,7 @@ def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
     return pd.DataFrame(cleaned, columns=CUT_PLAN_COLUMNS)
 
 
-def _parse_table_range(value) -> Optional[set]:
-    """Parse a 'Table No. (Mark Type 101)' restriction value such as
-    "23-47" into the set of allowed Table ID integers. Also accepts a
-    comma-separated mix of ranges and single values (e.g. "1-6, 12,
-    20-22"), stripping stray whitespace around each part. Returns None if
-    the value is blank or nothing usable could be parsed out of it -
-    meaning "no restriction", never "restrict to nothing"."""
-    if value is None:
-        return None
-    s = str(value).strip()
-    if s == "" or s.lower() == "nan":
-        return None
-    allowed = set()
-    for part in s.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        if "-" in part:
-            bounds = part.split("-")
-            if len(bounds) == 2:
-                try:
-                    lo = int(float(bounds[0].strip()))
-                    hi = int(float(bounds[1].strip()))
-                    if lo > hi:
-                        lo, hi = hi, lo
-                    allowed.update(range(lo, hi + 1))
-                    continue
-                except (TypeError, ValueError):
-                    pass
-        else:
-            try:
-                allowed.add(int(float(part)))
-                continue
-            except (TypeError, ValueError):
-                pass
-    return allowed or None
-
-
-def compute_mark101_table_restrictions(source_df: pd.DataFrame) -> dict:
-    """Build {(Sewing Line, JobCut - Suffix): {allowed Table ID, ...}} for
-    every JobCut whose Mark Type 101 rows carry a non-blank "Table No.
-    (Mark Type 101)" value in the source data (e.g. "23-47" - see
-    _parse_table_range()). This column is only ever filled in on a
-    JobCut's Mark Type 101 rows, so ONLY Mark Type 101 planning is ever
-    restricted by it - every other Mark Type in the same JobCut is
-    unaffected. A JobCut with no such value anywhere is simply absent from
-    the returned dict (unrestricted - every incomplete table is a
-    candidate, same as before this restriction existed)."""
-    if "Table No. (Mark Type 101)" not in source_df.columns or "Mark Type" not in source_df.columns:
-        return {}
-    mark101_rows = source_df[source_df["Mark Type"].astype(str).str.strip() == "101"]
-    restrictions = {}
-    for (sewing_line, jobcut_suffix), g in mark101_rows.groupby(["Sewing Line", "JobCut - Suffix"], dropna=False):
-        for raw in g["Table No. (Mark Type 101)"]:
-            allowed = _parse_table_range(raw)
-            if allowed:
-                restrictions[(str(sewing_line), str(jobcut_suffix))] = allowed
-                break
-    return restrictions
-
-
-def _candidate_table_pool(
-    df: pd.DataFrame,
-    wip_target_overrides: Optional[dict] = None,
-    apply_mark101_restriction: bool = True,
-) -> pd.DataFrame:
+def _candidate_table_pool(df: pd.DataFrame, wip_target_overrides: Optional[dict] = None) -> pd.DataFrame:
     """Shared step for build_cut_plan() and recalc_cut_plan(): drop completed
     colorway rows, then combine Qty across colorways sharing a Table ID.
     Returns one row per (Sewing Line, JobCut - Suffix, Mark Type, Table ID).
@@ -755,16 +646,6 @@ def _candidate_table_pool(
     alone doesn't capture. Lines with no override entry keep using Tab 1's
     value, so this degrades gracefully when Tab 2 hasn't been uploaded, or
     doesn't cover every line.
-
-    apply_mark101_restriction (default True): when a JobCut's Mark Type
-    101 rows carry a "Table No. (Mark Type 101)" value (see
-    compute_mark101_table_restrictions()), Mark Type 101 candidates for
-    that JobCut are narrowed down to only the Table IDs within that
-    range - tables outside it are dropped from the pool entirely, so the
-    smallest-Table-ID-first selection in build_cut_plan()/recalc_cut_plan()
-    never reaches them. Pass False for a raw, unrestricted lookup (used by
-    lookup_table_qty() so a user can still manually look up/add a
-    real table even if it happens to sit outside the restricted range).
     """
     work = df.copy()
     work["Qty"] = pd.to_numeric(work["Qty"], errors="coerce").fillna(0)
@@ -788,19 +669,6 @@ def _candidate_table_pool(
         )
         .reset_index()
     )
-
-    if apply_mark101_restriction:
-        restrictions = compute_mark101_table_restrictions(df)
-        if restrictions:
-            def _is_allowed(row) -> bool:
-                if str(row["Mark Type"]).strip() != "101":
-                    return True
-                allowed = restrictions.get((str(row["Sewing Line"]), str(row["JobCut - Suffix"])))
-                if allowed is None:
-                    return True
-                return pd.notna(row["Table ID"]) and int(row["Table ID"]) in allowed
-
-            table_level = table_level[table_level.apply(_is_allowed, axis=1)].reset_index(drop=True)
 
     if wip_target_overrides:
         override_series = table_level["Sewing Line"].map(wip_target_overrides)
@@ -937,13 +805,6 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None, wi
          Tab 1's Sewing Target Per Day (with OT) column otherwise. See
          compute_wip_target_overrides() for how that override mapping is
          built and _candidate_table_pool() for exactly where it's applied.
-      3b. MARK TYPE 101 TABLE RESTRICTION
-         If a JobCut's Table No. (Mark Type 101) field has a value (e.g.
-         "23-47"), Mark Type 101 for that JobCut only draws candidates from
-         Table IDs inside that range - tables outside it are never
-         selected, even if they're incomplete and would otherwise be
-         picked. Every other Mark Type in the same JobCut is unaffected.
-         See compute_mark101_table_restrictions() and _parse_table_range().
       4. Cut Plan Morning / Cut Plan Afternoon is decided per group, from
          the selected tables' quantities alone - see split_morning_afternoon():
          a single selected table goes entirely to Morning; with more than
@@ -1037,14 +898,8 @@ def lookup_table_qty(source_df: pd.DataFrame, sewing_line: str, jobcut_suffix: s
 
     Returns the quantity (int) if that exact (Sewing Line, JobCut - Suffix,
     Mark Type, Table ID) combination exists in the source data, else None.
-
-    Deliberately unrestricted by the Mark Type 101 table-range restriction
-    (apply_mark101_restriction=False) - this is a plain "does this table
-    really exist, and what's its real quantity" lookup for when the user
-    manually types a Table No. themselves, so it should find any real
-    table regardless of whether automatic selection would have picked it.
     """
-    table_level = _candidate_table_pool(source_df, apply_mark101_restriction=False)
+    table_level = _candidate_table_pool(source_df)
     match = table_level[
         (table_level["Sewing Line"].astype(str) == str(sewing_line))
         & (table_level["JobCut - Suffix"].astype(str) == str(jobcut_suffix))
@@ -1223,6 +1078,11 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
     return result_df
 
 
+# Documents the Tab 3 planning rules in plain English. No longer written
+# into the downloaded Excel files (the "Logic & Assumptions" sheet was
+# removed) - kept here purely as an in-code reference for anyone reading
+# the source, describing the same logic implemented in build_cut_plan()/
+# recalc_cut_plan()/split_morning_afternoon() below.
 CUT_PLAN_ASSUMPTIONS_TEXT = [
     "CUT PLANNING MODEL v2 — TAB 3: CUT PLAN",
     "",
@@ -1251,13 +1111,6 @@ CUT_PLAN_ASSUMPTIONS_TEXT = [
     "first exceeds) the group's Sewing Target Per Day. Only the selected tables appear in the",
     "output.",
     "",
-    "4b. MARK TYPE 101 TABLE RESTRICTION",
-    "If a JobCut's \"Table No. (Mark Type 101)\" field has a value (e.g. \"23-47\"), Mark Type 101",
-    "for that JobCut only draws candidates from Table IDs inside that range - tables outside it",
-    "are never selected, even if incomplete. Every other Mark Type in the same JobCut is",
-    "unaffected. A manually added Table No. (typed directly into a row on the Cut Plan tab) can",
-    "still be any real table, regardless of this range.",
-    "",
     "5. Cut Plan Qty / Diff",
     "Cut Plan Qty = sum of combined Qty across all tables selected for that group (repeated on",
     "each row of the group for readability). Diff = Cut Plan Qty - Sewing Target Per Day.",
@@ -1280,8 +1133,10 @@ CUT_PLAN_ASSUMPTIONS_TEXT = [
 
 def _write_cut_plan_sheet(ws, plan_df: pd.DataFrame, title_text: str, edited_at: Optional[datetime] = None) -> None:
     """Write one Cut Plan table (one building's worth of rows) into the given
-    worksheet: title row(s), header, data with merged repeated values,
-    grouping borders, column widths, freeze panes and auto-filter."""
+    worksheet, starting directly with the header row - no title/notice rows
+    above it. title_text/edited_at are still accepted (existing callers
+    pass them) but no longer written into the sheet itself; the run
+    date/time and "manually edited" state are shown in the web UI instead."""
     header_fill = PatternFill("solid", fgColor="1F4E78")
     header_font = Font(name=FONT_NAME, bold=True, color="FFFFFF", size=10)
     cell_font = Font(name=FONT_NAME, size=10)
@@ -1296,20 +1151,8 @@ def _write_cut_plan_sheet(ws, plan_df: pd.DataFrame, title_text: str, edited_at:
     border_new_jobcut = Border(left=thin, right=thin, top=medium_top, bottom=thin)
     center = Alignment(horizontal="center", vertical="center")
     left = Alignment(horizontal="left", vertical="center")
-    title_font = Font(name=FONT_NAME, size=10, bold=True, color=TITLE_FONT_COLOR)
-    edited_font = Font(name=FONT_NAME, size=10, bold=True, color=WARN_FONT_COLOR)
 
-    ws.cell(row=1, column=1, value=title_text).font = title_font
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=len(CUT_PLAN_COLUMNS))
-
-    next_row = 2
-    if edited_at is not None:
-        edited_text = f"Manually edited on {edited_at.strftime('%Y-%m-%d %H:%M')} — values below may differ from the automatic plan"
-        ws.cell(row=2, column=1, value=edited_text).font = edited_font
-        ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=len(CUT_PLAN_COLUMNS))
-        next_row = 3
-
-    header_row = next_row
+    header_row = 1
     headers = list(plan_df.columns)
     for j, h in enumerate(headers, start=1):
         c = ws.cell(row=header_row, column=j, value=h)
@@ -1407,9 +1250,8 @@ def write_single_building_workbook(
     output_path: str,
     edited_at: Optional[datetime] = None,
 ) -> None:
-    """Write ONE standalone workbook for a single building: its Cut Plan
-    sheet (titled "<building_label> of <downloaded_date>") plus a Logic &
-    Assumptions sheet, so each building's file is self-contained.
+    """Write ONE standalone workbook for a single building: just its Cut
+    Plan sheet (titled "<building_label> of <downloaded_date>").
 
     downloaded_date should be the date the file is actually being generated
     for download (i.e. "today"), not necessarily the plan's target date -
@@ -1423,13 +1265,6 @@ def write_single_building_workbook(
     title_text = f"{building_label} of {downloaded_date.isoformat()}   |   Generated: {generated_at}"
     _write_cut_plan_sheet(ws, building_df, title_text, edited_at=edited_at)
 
-    ws2 = wb.create_sheet("Logic & Assumptions")
-    ws2.column_dimensions["A"].width = 100
-    for i, text in enumerate(CUT_PLAN_ASSUMPTIONS_TEXT, start=1):
-        c = ws2.cell(row=i, column=1, value=text)
-        c.font = Font(name=FONT_NAME, size=10, bold=(i == 1))
-        c.alignment = Alignment(wrap_text=True, vertical="top")
-
     wb.save(output_path)
 
 
@@ -1441,7 +1276,7 @@ def write_cut_plan_workbook(
 ) -> None:
     """Write the formatted Tab 3 output workbook: one sheet per building
     ("Building 1", "Building 2", and "Unassigned" if any Sewing Line doesn't
-    map to either) plus a Logic & Assumptions sheet.
+    map to either).
 
     Pass edited_at when this call is regenerating the file after the user
     manually adjusted the plan table in the browser - it's noted in each
@@ -1463,13 +1298,5 @@ def write_cut_plan_workbook(
         ws = wb.create_sheet(key)
         title_text = f"{key} of {plan_date_str}   |   Generated: {generated_at}"
         _write_cut_plan_sheet(ws, building_df, title_text, edited_at=edited_at)
-
-    # ---- Logic & Assumptions ----
-    ws2 = wb.create_sheet("Logic & Assumptions")
-    ws2.column_dimensions["A"].width = 100
-    for i, text in enumerate(CUT_PLAN_ASSUMPTIONS_TEXT, start=1):
-        c = ws2.cell(row=i, column=1, value=text)
-        c.font = Font(name=FONT_NAME, size=10, bold=(i == 1))
-        c.alignment = Alignment(wrap_text=True, vertical="top")
 
     wb.save(output_path)
