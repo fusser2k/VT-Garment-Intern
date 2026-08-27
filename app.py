@@ -33,7 +33,7 @@ from cutplan2 import (
     load_wip,
     write_wip_workbook,
     build_cut_plan,
-    compute_wip_target_overrides,
+    compute_wip_session_targets,
     recalc_cut_plan,
     lookup_table_qty,
     write_cut_plan_workbook,
@@ -286,12 +286,14 @@ def wip_upload():
     preview_df = df.head(WIP_PREVIEW_ROW_LIMIT)
     rows = preview_df.where(preview_df.notna(), "").to_dict(orient="records")
 
-    # Compute the Sewing Line -> Target for Day (with OT) override mapping
-    # right away, against the FULL df (not the possibly-truncated preview) -
-    # see compute_wip_target_overrides()/SEWING_LINE_NAME_MAP in
-    # cutplan2/model.py. Tab 3 uses this (falling back to Tab 1's own value
-    # for any line it doesn't cover) whenever this session has WIP data.
-    target_overrides = compute_wip_target_overrides(df) if structured else {}
+    # Compute the Sewing Line -> (Target Morning, Target Afternoon, Target
+    # OT) mapping right away, against the FULL df (not the possibly-
+    # truncated preview) - see compute_wip_session_targets() in
+    # cutplan2/model.py. Tab 3 requires this to generate a plan at all
+    # (its planning logic is now built around these three per-session
+    # targets), so it's computed once here rather than on every /cut-plan
+    # request.
+    session_targets = compute_wip_session_targets(df) if structured else {}
 
     SESSIONS[sid]["wip"] = {
         "now": now_th(),
@@ -303,7 +305,7 @@ def wip_upload():
         "truncated": len(df) > WIP_PREVIEW_ROW_LIMIT,
         "structured": structured,
         "download_filename": download_filename,
-        "target_overrides": target_overrides,
+        "session_targets": session_targets,
     }
     return _render(active_tab=2)
 
@@ -329,19 +331,20 @@ def cut_plan():
         flash(translate("run_tab1_first", _get_lang()))
         return redirect(url_for("index", tab=3))
 
+    # Tab 3's planning is now built entirely around Tab 2's per-Sewing-Line
+    # Morning/Afternoon/OT targets (see compute_wip_session_targets()) -
+    # unlike before, Tab 2 is now a REQUIRED input, not an optional
+    # override on top of Tab 1 alone.
+    wip_session = SESSIONS[sid].get("wip")
+    if not wip_session or not wip_session.get("structured"):
+        flash(translate("run_tab2_first", _get_lang()))
+        return redirect(url_for("index", tab=3))
+    wip_session_targets = wip_session.get("session_targets") or {}
+
     run_datetime = now_th()
 
-    # If this session has WIP data (Tab 2), use its per-line "Target for Day
-    # (with OT)" as an override for Tab 1's own Sewing Target Per Day (with
-    # OT) - falls back to Tab 1's value for any Sewing Line the WIP data
-    # doesn't cover. Silently empty (no override at all) if Tab 2 hasn't
-    # been used yet this session, or its file didn't match the known
-    # template.
-    wip_session = SESSIONS[sid].get("wip")
-    wip_target_overrides = (wip_session or {}).get("target_overrides") or {}
-
     try:
-        plan_df, run_info = build_cut_plan(extraction["df"], run_datetime, wip_target_overrides=wip_target_overrides)
+        plan_df, run_info = build_cut_plan(extraction["df"], wip_session_targets, run_datetime)
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:
         flash(f"Error while building the cut plan: {e}")

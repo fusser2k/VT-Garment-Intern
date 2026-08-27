@@ -112,31 +112,32 @@ TRANSLATIONS = {
     "decoration_flag_text": {"en": "\u2691 Multiple Mark Types need decoration", "th": "\u2691 มีหลาย Mark Type ที่ต้องปัก"},
     "decoration_flag_title": {
         "en": "This JobCut has more than one Mark Type needing decoration — you don't have to plan "
-              "every Mark Type, or plan enough tables to fully reach the Sewing target per day.",
+              "every Mark Type, or plan enough tables to fully reach every session's target.",
         "th": "JobCut นี้มี Mark Type ที่ต้องปักมากกว่า 1 แบบ — ไม่จำเป็นต้องวางแผนให้ครบทุก Mark Type "
-              "หรือวางแผนโต๊ะให้ถึงเป้าหมายการเย็บต่อวันแบบเต็มจำนวน",
+              "หรือวางแผนโต๊ะให้ถึงเป้าหมายของทุกช่วงเวลาแบบเต็มจำนวน",
     },
     "edit_note": {
-        "en": "Every cell below is editable — including Cut Plan Qty and Diff. Editing a row's Cut Plan "
-              "Qty updates that same row's Morning/Afternoon to match. Editing a row's Table No. looks "
-              "up that table's real quantity from Tab 1's data. Editing Cut Plan Qty or Sewing target "
-              "per day re-checks which tables are needed — more tables get pulled in if the target now "
-              "needs them, and tables beyond what's needed get dropped. Use + Add row to plan an extra "
-              "table by hand, or the \u2715 next to a row to drop it. Note starts blank. Nothing is "
-              "saved until you click Save changes & Download Excel — that saves both buildings' tables "
-              "together into one workbook.",
-        "th": "ทุกช่องด้านล่างสามารถแก้ไขได้ — รวมถึง Cut Plan Qty และ Diff การแก้ไข Cut Plan Qty ของแถวใดจะอัปเดต "
-              "Morning/Afternoon ของแถวนั้นให้ตรงกันด้วย การแก้ไข Table No. จะดึงจำนวนจริงของโต๊ะนั้นจากข้อมูลแท็บ 1 "
-              "การแก้ไข Cut Plan Qty หรือ Sewing target per day จะตรวจสอบใหม่ว่าต้องใช้โต๊ะไหนบ้าง — "
-              "จะดึงโต๊ะเพิ่มเข้ามาถ้าจำเป็นต่อเป้าหมาย และจะตัดโต๊ะที่เกินความจำเป็นออก ใช้ปุ่ม + Add row เพื่อเพิ่มโต๊ะเอง "
-              "หรือกด \u2715 ข้างแถวเพื่อลบ Note จะเริ่มต้นเป็นค่าว่าง จะยังไม่มีการบันทึกจนกว่าจะกด Save changes & "
-              "Download Excel ซึ่งจะบันทึกตารางของทั้งสองอาคารรวมกันเป็นไฟล์เดียว",
+        "en": "Every cell below is editable, including each session's Cut Plan quantity and its Diff. "
+              "Editing a row's Table No. looks up that table's real quantity from Tab 1's data. Editing "
+              "a Cut Plan quantity or a session target (Morning/Afternoon/OT) re-checks which tables are "
+              "needed for that group — more tables get pulled in if a target now needs them, and tables "
+              "beyond what's needed get dropped. Use + Add row to plan an extra table by hand, or the "
+              "\u2715 next to a row to drop it. Note starts blank. Nothing is saved until you click Save "
+              "changes & Download Excel — that saves both buildings' tables together into one workbook.",
+        "th": "ทุกช่องด้านล่างสามารถแก้ไขได้ รวมถึงจำนวน Cut Plan และ Diff ของแต่ละช่วงเวลา การแก้ไข Table No. "
+              "จะดึงจำนวนจริงของโต๊ะนั้นจากข้อมูลแท็บ 1 การแก้ไขจำนวน Cut Plan หรือเป้าหมายของช่วงเวลาใด "
+              "(เช้า/บ่าย/OT) จะตรวจสอบใหม่ว่ากลุ่มนั้นต้องใช้โต๊ะไหนบ้าง — จะดึงโต๊ะเพิ่มเข้ามาถ้าจำเป็นต่อเป้าหมาย "
+              "และจะตัดโต๊ะที่เกินความจำเป็นออก ใช้ปุ่ม + Add row เพื่อเพิ่มโต๊ะเอง หรือกด \u2715 ข้างแถวเพื่อลบ Note "
+              "จะเริ่มต้นเป็นค่าว่าง จะยังไม่มีการบันทึกจนกว่าจะกด Save changes & Download Excel "
+              "ซึ่งจะบันทึกตารางของทั้งสองอาคารรวมกันเป็นไฟล์เดียว",
     },
     "generated_label": {"en": "Generated", "th": "สร้างเมื่อ"},
     "table_rows_planned_total": {"en": "table row(s) planned total", "th": "แถวโต๊ะที่วางแผนทั้งหมด"},
     "wip_override_note": {
-        "en": "Sewing Target Per Day for these Sewing Lines came from Tab 2's WIP data (not Tab 1):",
-        "th": "เป้าหมายการเย็บต่อวันของ Sewing Line เหล่านี้มาจากข้อมูล WIP ในแท็บ 2 (ไม่ใช่แท็บ 1):",
+        "en": "Sewing Lines skipped this run - no matching Sewing Line found in Tab 2's WIP data, "
+              "so their Morning/Afternoon/OT targets are unknown and they weren't planned:",
+        "th": "Sewing Line ที่ถูกข้ามในการวางแผนครั้งนี้ - ไม่พบ Sewing Line นี้ในข้อมูล WIP ของแท็บ 2 "
+              "จึงไม่ทราบเป้าหมายช่วงเช้า/บ่าย/OT และไม่ได้วางแผนให้:",
     },
     "save_changes_btn": {"en": "Save changes & Download Excel", "th": "บันทึกการเปลี่ยนแปลง & ดาวน์โหลด Excel"},
     "table_rows_planned": {"en": "table row(s) planned", "th": "แถวโต๊ะที่วางแผน"},
@@ -177,6 +178,12 @@ TRANSLATIONS = {
         "en": "Run Tab 1 (Buffer Cutting Order Form) first — the cut plan is built from that extracted data.",
         "th": "กรุณารันแท็บ 1 (ใบสั่งตัดบัฟเฟอร์) ก่อน — แผนการตัดจะสร้างจากข้อมูลที่ดึงมาจากแท็บนั้น",
     },
+    "run_tab2_first": {
+        "en": "Upload a WIP file on Tab 2 first — the cut plan now needs its Morning/Afternoon/OT "
+              "targets to know how far to plan each Job Cut.",
+        "th": "กรุณาอัปโหลดไฟล์ WIP ในแท็บ 2 ก่อน — ตอนนี้แผนการตัดต้องใช้เป้าหมายกะเช้า/บ่าย/OT "
+              "เพื่อกำหนดว่าจะวางแผนแต่ละ Job Cut ไปถึงระดับไหน",
+    },
 
     # ---- JS status strings ----
     "js_saving": {"en": "Saving\u2026", "th": "กำลังบันทึก\u2026"},
@@ -191,7 +198,6 @@ TRANSLATIONS = {
         "th": "บันทึกแล้ว (ไม่มีไฟล์ให้ดาวน์โหลด — ทั้งสองอาคารไม่มีข้อมูล)",
     },
     "js_undo_edit": {"en": "Undo this edit", "th": "เลิกทำการแก้ไขนี้"},
-    "js_swap_shift": {"en": "Move to the other shift (Morning \u2194 Afternoon)", "th": "ย้ายไปกะตรงข้าม (เช้า \u2194 บ่าย)"},
     "js_remove_row": {"en": "Remove row", "th": "ลบแถว"},
     "js_insert_row_below": {"en": "Insert a new row below this one", "th": "แทรกแถวใหม่ใต้แถวนี้"},
     "js_rows_shown_of_total": {"en": "shown (filtered)", "th": "ที่แสดง (กรองแล้ว)"},
@@ -230,12 +236,17 @@ COLUMN_LABELS = {
     "Start Cut": {"en": "Start Cut", "th": "วันที่เริ่มตัด"},
 
     # Tab 3 (Cut Plan)
-    "Sewing target per day": {"en": "Sewing target per day", "th": "เป้าหมายการเย็บต่อวัน"},
-    "Cut Plan Qty": {"en": "Cut Plan Qty", "th": "จำนวนที่วางแผนตัด"},
-    "Diff": {"en": "Diff", "th": "ส่วนต่าง"},
+    "Sewing Target Per Day": {"en": "Sewing Target Per Day", "th": "เป้าหมายการเย็บต่อวัน"},
     "Table No.": {"en": "Table No.", "th": "หมายเลขโต๊ะ"},
+    "Sewing target Morning": {"en": "Sewing target Morning", "th": "เป้าหมายการเย็บช่วงเช้า"},
     "Cut Plan Morning": {"en": "Cut Plan Morning", "th": "แผนตัดช่วงเช้า"},
+    "Diff (Morning)": {"en": "Diff (Morning)", "th": "ส่วนต่าง (เช้า)"},
+    "Sewing target Afternoon": {"en": "Sewing target Afternoon", "th": "เป้าหมายการเย็บช่วงบ่าย"},
     "Cut Plan Afternoon": {"en": "Cut Plan Afternoon", "th": "แผนตัดช่วงบ่าย"},
+    "Diff (Afternoon)": {"en": "Diff (Afternoon)", "th": "ส่วนต่าง (บ่าย)"},
+    "Sewing target OT": {"en": "Sewing target OT", "th": "เป้าหมายการเย็บช่วง OT"},
+    "Cut Plan OT": {"en": "Cut Plan OT", "th": "แผนตัดช่วง OT"},
+    "Diff (OT)": {"en": "Diff (OT)", "th": "ส่วนต่าง (OT)"},
     "Note": {"en": "Note", "th": "หมายเหตุ"},
 
     # Tab 2 (WIP) - a representative subset; any column not listed here falls

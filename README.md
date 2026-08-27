@@ -10,9 +10,9 @@ build for cut planning. It currently has three tabs, all on one page:
   actuals, WIP quantities, lead times, shortfall reasons). Falls back to a
   raw, no-schema preview for a file that doesn't match the known template.
 - **Tab 3: Cut Plan** — plans which cutting tables to work on first, using
-  Tab 1's extracted data. If Tab 2's WIP data has been uploaded this
-  session, its per-line target overrides Tab 1's own value wherever it
-  covers a given Sewing Line (see below).
+  Tab 1's extracted data together with each Sewing Line's own
+  Morning/Afternoon/OT targets from Tab 2's WIP data (required — a Sewing
+  Line with no matching Tab 2 coverage is skipped this run; see below).
 
 Switching tabs is instant (client-side) and doesn't lose what's on the other
 tabs — upload something on Tab 1, switch to Tab 2, upload something there,
@@ -27,7 +27,7 @@ The choice is stored in your browser session and applies across all three
 tabs immediately.
 
 Internally, only the *display* text changes — every internal column name
-used in the code (`Sewing Line`, `Cut Plan Qty`, `data-col` attributes in
+used in the code (`Sewing Line`, `Cut Plan Morning`, `data-col` attributes in
 the HTML, Python dict keys, etc.) always stays in English, so translations
 never risk breaking any of the app's logic. All translated strings live in
 one place: `cutplan2/i18n.py` — `TRANSLATIONS` for UI text and
@@ -130,10 +130,11 @@ from the old model, so both can run at once). Open that URL in your browser
   **Download Excel** button, or falls back to a raw, unmapped preview if
   the file doesn't match the known template.
 - **Tab 3: Cut Plan** — click **Generate cut plan** (uses Tab 1's extracted
-  data, so run Tab 1 first). The plan is shown as an **editable table** —
-  adjust any cell, add/remove rows, **filter by any column** — then
-  **Save changes & Download Excel** saves your edits and downloads one
-  Excel file per building.
+  data plus Tab 2's Morning/Afternoon/OT targets, so run both Tab 1 and
+  Tab 2 first). The plan is shown as an **editable table** — adjust any
+  cell, add/remove rows, **filter by any column** — then **Save changes &
+  Download Excel** saves your edits and downloads one Excel file per
+  building.
 
 Results from each tab are kept in memory (per-browser session) as you
 navigate between tabs, so uploading on one tab doesn't clear what's on
@@ -154,7 +155,18 @@ different number of sewing lines.
 
 Column A of each row (**Sewing Line Code**, e.g. `VSEW012`) is extracted
 too — this is what ties a WIP row back to Tab 1's own Sewing Line
-identifier for the Tab 3 target override described above.
+identifier for the Tab 3 target override described above. **When column A
+is blank** (not every day's WIP file has it filled in), the code is
+recognized instead from that row's own **Sewing Line** Thai name/team text
+(e.g. "ราตรี /") against a fixed lookup table
+(`SEWING_LINE_THAI_ROOTS`/`match_sewing_line_code()` in
+`cutplan2/model.py`) — tolerant of the name ending without a trailing "/",
+with an extra number, or nothing at all after the name. A genuine code
+already present in the file is always kept as-is and never overridden by
+the Thai-name guess. Either way, the resulting code is what's shown in
+Tab 2's own "Sewing Line Code" column (and its downloaded Excel) and what
+Tab 3's target override matches against — there's no separate matching
+logic in two places.
 
 The ~40 columns extracted cover: targets (per hour, morning, afternoon,
 OT — with/without OT), actuals for each shift, WIP quantities at each stage
@@ -197,99 +209,126 @@ of failing outright.
 
 ### How the cut plan (Tab 3) is built
 
+**Tab 2's WIP data is now required, not optional.** Planning is built around
+each Sewing Line's own **Morning / Afternoon / OT targets** from Tab 2 (its
+`Target Morning`, `Target Afternoon`, `Target OT` columns), not a single
+daily total. If Tab 2 hasn't been uploaded this session (or its file didn't
+match the known template), Tab 3 won't generate a plan at all — it'll ask
+you to run Tab 2 first.
+
 For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
 
-1. **Completed tables are skipped.** Status is recorded per colorway row —
-   a table with mixed colorway status (e.g. one colorway Completed, another
-   still Pending) isn't skipped entirely, only its completed colorway's
-   quantity is dropped.
-2. **Colorways sharing a Table ID are combined** into one quantity for that
+1. **Only rows with Status exactly "Pending" are planning candidates.**
+   Status is recorded per colorway row — a table with mixed colorway status
+   (e.g. one colorway Pending, another Completed) isn't skipped entirely,
+   only its non-Pending colorway's quantity is dropped; the Pending
+   colorway(s) are still planned. Both "Completed" **and** "In Progress"
+   are excluded — this is stricter than just excluding Completed alone.
+2. **A Sewing Line with no matching row in Tab 2's WIP data is skipped
+   entirely this run** — none of its tables get planned at all, rather than
+   guessing with a made-up target. A note on Tab 3's results lists exactly
+   which Sewing Lines were skipped this way, so it's never a silent gap.
+   **Matching a Tab 1 Sewing Line (e.g. "VSEW012") to a row in Tab 2's WIP
+   data** happens via Tab 2's own **"Sewing Line Code"** column (see "How
+   the WIP file is extracted" above for exactly how that column gets
+   populated, including its Thai-name-recognition fallback). Merged lines
+   (two individual lines sharing one combined line, e.g. "นิภาพร +
+   ชุติมันต์" → `VS02+06`, since 02 and 06 are the two individual lines' own
+   numbers) are handled the same way. Update
+   `SEWING_LINE_THAI_ROOTS`/`SEWING_LINE_MERGED_ROOTS` in
+   `cutplan2/model.py` if a line's assigned supervisor/team changes.
+3. **Colorways sharing a Table ID are combined** into one quantity for that
    table before planning.
-3. Tables are planned **smallest Table ID first**, adding tables in that
-   order until the running combined quantity reaches that group's target —
-   the with-OT figure, not the computed no-OT one (which is purely
-   informational on Tab 1). **A fractional target (e.g. a WIP override like
-   412.8) is always rounded UP** to a whole number before anything else
-   happens with it — never down — so a group never looks like it needs
-   fewer tables than it actually does. That same rounded-up whole number is
-   used consistently everywhere: the table-selection cutoff, the displayed
-   Sewing target per day, and the Diff calculation, so the numbers on the
-   page always add up exactly (Cut Plan Qty − Sewing target per day = Diff,
-   with no rounding surprises). **Which "with-OT" value gets used depends on
-   whether Tab 2 has WIP data for that Sewing Line:**
-   - **If Tab 2's WIP data has been uploaded this session and covers that
-     Sewing Line**, its own **Target for Day (with OT)** overrides Tab 1's
-     Sewing Target Per Day (with OT) for every group on that line — since
-     different sewing lines can have a different actual daily target that
-     Tab 1's data alone doesn't capture.
-   - **Otherwise** (Tab 2 hasn't been used yet this session, its file
-     didn't match the known template, or it simply doesn't cover that
-     particular line), Tab 1's own value is used, exactly as before.
-   - A green banner on Tab 3's results lists exactly which Sewing Lines
-     got their target from Tab 2 in that run, so it's never a silent
-     change.
-   - **Matching a Tab 1 Sewing Line (e.g. "VSEW012") to a row in Tab 2's
-     WIP data** happens purely via the WIP report's own **"Sewing Line
-     Code"** column — extracted directly from column A of the source file
-     (now shown in Tab 2's table too), keeping only values that actually
-     start with "VS". Tab 2's separate "Sewing Line" column (the Thai
-     supervisor/team name, e.g. "ราตรี") is never used for matching — a
-     row with no usable code in column A is simply skipped, falling back
-     to Tab 1's own value for that line.
-4. **Cut Plan Morning / Cut Plan Afternoon is decided per group, purely
-   from the selected tables' quantities** — no wall-clock time, no user
-   choice, no cross-session memory involved:
-   - If a group has **exactly one** selected table, its whole quantity goes
-     to **Morning** by default.
-   - If a group has **more than one** selected table, they're split into a
-     "top" part (Morning) and a "bottom" part (Afternoon): walking the
-     tables in Table ID order, each stays in the top/Morning part and its
-     quantity accumulates, until the running total reaches **half of the
-     group's own Cut Plan Qty** — the total quantity actually being
-     allocated across the selected tables, **not** half of Sewing Target
-     Per Day (the selected tables often don't add up anywhere near the
-     target, and the split still needs to happen either way). The table
-     whose addition crosses that halfway point is still counted in the
-     top/Morning part; every table after that point goes to the
-     bottom/Afternoon part — so when the total can't split into two exactly
-     equal halves, the larger portion normally lands in Morning.
-   - **A split always happens whenever there's more than one table.** If
-     one large table (typically the last one in Table ID order) is big
-     enough that the halfway point isn't crossed until it's added — which
-     would otherwise leave Afternoon empty — that table is moved to
-     Afternoon instead. This is the one case where the larger side can end
-     up in Afternoon rather than Morning; guaranteeing an actual split
-     takes priority.
-   - This is fully deterministic and gets **recomputed fresh** every time
-     the plan is generated or recalculated (e.g. editing a target or a
-     table's quantity can shift where the halfway point falls, moving
-     tables between Morning and Afternoon accordingly). See
-     `split_morning_afternoon()` in `cutplan2/model.py` for the exact logic.
-5. **Note always starts blank, for every table.** The
+4. **Tables are planned smallest Table ID first, one session at a time —
+   Morning, then Afternoon, then OT.** A running **Diff** = (total quantity
+   planned in the group so far, across every table and session) minus (the
+   sum of every session's target up to and including the one currently
+   being filled). The moment a table's addition pushes that Diff to zero or
+   above, that table is the **last one for the current session** — the next
+   table moves into the next session, and the cumulative target immediately
+   jumps up by that whole next session's target. Once OT's Diff also
+   reaches zero or above, or all three sessions have been used, the group
+   stops — any remaining tables for that group stay pending for a future
+   run rather than being force-fit into an already-full day. Each table
+   belongs to **exactly one session**: its own quantity appears in that
+   session's Cut Plan column, with the other two sessions' Cut Plan columns
+   left at 0 for that row.
+
+   **Worked example** (targets Morning 144 / Afternoon 154 / OT 115, tables
+   2–7 with quantities 133, 60, 65, 36, 12, 8):
+
+   | Table | Session   | Cut Plan | Diff |
+   |-------|-----------|---------:|-----:|
+   | 2     | Morning   | 133      | −11  |
+   | 3     | Morning   | 60       | 49   |
+   | 4     | Afternoon | 65       | −40  |
+   | 5     | Afternoon | 36       | −4   |
+   | 6     | Afternoon | 12       | 8    |
+   | 7     | OT        | 8        | −99  |
+
+   Table 3's Diff (49) carries into Table 4's calculation: 49 + 65 − 154 =
+   −40. This carry-forward is why Diff can look larger than a single
+   table's own quantity — it's cumulative across the whole group, not reset
+   per table.
+
+   **A note on rounding:** each session's own target (144/154/115 above) is
+   rounded UP individually from Tab 2's fractional value, since the
+   cascading selection needs a whole number to compare Diff against for
+   each session. **Sewing Target Per Day**, shown as a separate reference
+   column, is **not** the sum of those three already-rounded numbers —
+   summing individually-rounded values can overshoot the true total by a
+   couple of units (e.g. Morning 144.0 + Afternoon 153.6 + OT 115.2 = 412.8,
+   which should round up to 413 — but 144 + 154 + 116 = 414). It's always
+   computed as the ceiling of the raw fractional total instead, so it
+   matches Tab 2's own "Target for Day (with OT)" figure rounded up exactly
+   once.
+5. **Exception — oversized tables:** if a table's own Qty is more than
+   double the group's Morning target, **and** the group hasn't yet moved
+   past Morning (no earlier table's Diff has turned non-negative), that
+   table isn't split across sessions at all — its full Qty goes into Cut
+   Plan Morning alone, and the **entire group** stops planning right there,
+   regardless of how many other tables are still pending for that Mark
+   Type. An oversized table encountered *after* the group has already moved
+   on to Afternoon/OT is planned normally into whichever session it's
+   actually in — this exception only applies to the group's still-in-Morning
+   phase.
+6. **Note always starts blank, for every table.** The
    model never writes anything into it automatically; it's reserved
    entirely for the user's own manual comments, added on the
    editable table before saving.
-6. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
+7. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
    on the page and in the downloaded Excel — matching the reference
    planning sheet's layout.
-7. **Repeated values are merged, not repeated** — Sewing Line and JobCut -
-   Suffix show/hide together, re-displaying at the start of every JobCut
-   (not merged across a whole Sewing Line block). Mark Type re-displays at
-   the start of every Mark Type sub-block within a JobCut. Sewing target
-   per day, Cut Plan Qty, and Diff re-display at the start of every Mark
-   Type sub-block too — even if the value happens to coincide with the
-   previous Mark Type's value, they're shown again rather than silently
-   merged across the boundary. In the downloaded Excel these are **true
-   merged cells**. On the page, the repeated value is shown blank/faded
-   instead — click into it to reveal and edit it (there's no hover-reveal;
-   it only becomes visible when you actually focus the cell) — while a
-   thick border marks a new Sewing Line and a medium border marks a new
-   JobCut - Suffix, so each block is easy to pick out at a glance. Table
-   No., Cut Plan Morning, Cut Plan Afternoon, and Note are never merged —
-   they stay one row per table. This sort/merge/border grouping is
-   re-applied after every recalculation too, not just on the initial
-   "Generate cut plan".
-8. **Split into two tables by building**, based on Sewing Line — "Building 1
+8. **Repeated values are merged, not repeated**, at three different levels
+   of granularity:
+   - Sewing Line and JobCut - Suffix show/hide together, re-displaying at
+     the start of every JobCut (not merged across a whole Sewing Line
+     block).
+   - Mark Type and Sewing Target Per Day re-display at the start of every
+     Mark Type sub-block within a JobCut.
+   - Each session's own target (Sewing target Morning/Afternoon/OT)
+     re-displays at the start of **its own session's block of rows** — even
+     within the same, unchanged Mark Type. In the worked example above, the
+     Afternoon target shows again on Table 4's row, even though it's still
+     the same Mark Type as Tables 2–3's Morning rows.
+   - **Exception:** a Mark Type group with only **one row total** (e.g. an
+     oversized table stopping the group right there, or simply a group with
+     only one Pending table) shows **all three** session targets on that
+     one row, not just the one matching its own session — there's no "next
+     row" to show the others on, and seeing all three gives useful context
+     (e.g. confirming Morning alone already covers far more than a full
+     day's target, so Afternoon/OT genuinely aren't needed for that group).
+
+   In the downloaded Excel these are **true merged cells**. On the page,
+   the repeated value is shown blank/faded instead — click into it to
+   reveal and edit it (there's no hover-reveal; it only becomes visible
+   when you actually focus the cell) — while a thick border marks a new
+   Sewing Line and a medium border marks a new JobCut - Suffix, so each
+   block is easy to pick out at a glance. Table No., every Cut Plan/Diff
+   column, and Note are never merged — they stay one row per table. This
+   sort/merge/border grouping is re-applied after every recalculation too,
+   not just on the initial "Generate cut plan".
+9. **Split into two tables by building**, based on Sewing Line — "Building 1
    of `<date>`" and "Building 2 of `<date>`", shown as two separate tables
    on the page and downloaded as two **separate Excel files** (plus a third
    "Unassigned" file if any Sewing Line doesn't match either list — kept,
@@ -297,12 +336,13 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    actually click Save/Download, not the plan's target date. The building
    lists live in `BUILDING_1_LINES` / `BUILDING_2_LINES` at the top of
    `cutplan2/model.py` — edit those if a Sewing Line's building changes.
-9. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
-   more than one Mark Type needing decoration, you don't have to plan every
-   Mark Type or plan enough tables to fully reach the Sewing target per
-   day — partial planning is fine. Click the ✕ on the banner to dismiss it;
-   this is purely a one-time on-page reminder, not saved or synced anywhere.
-10. **Which specific JobCuts that applies to is flagged directly in the
+10. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
+    more than one Mark Type needing decoration, you don't have to plan
+    every Mark Type or plan enough tables to fully reach every session's
+    target — partial planning is fine. Click the ✕ on the banner to
+    dismiss it; this is purely a one-time on-page reminder, not saved or
+    synced anywhere.
+11. **Which specific JobCuts that applies to is flagged directly in the
     table.** Using Tab 1's `Decoration` field, any JobCut with more than one
     Mark Type marked `Decoration = Yes` gets a small amber
     "⚑ Multiple Mark Types need decoration" badge under its JobCut - Suffix
@@ -320,9 +360,9 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   each a self-contained workbook with just its own Cut Plan sheet. Your
   browser may ask permission the first time a page triggers more than one
   download at once; allow it to get both files.
-- Click into **any** cell to edit it — including **Cut Plan Qty** and
-  **Diff** — quantities, table numbers, notes, even Sewing Line /
-  JobCut - Suffix / Mark Type.
+- Click into **any** cell to edit it — every Cut Plan quantity and every
+  Diff, table numbers, notes, even Sewing Line / JobCut - Suffix / Mark
+  Type.
 - **Every edited cell shows its original value, with a one-click undo.**
   "Original" is pinned to the plan as it was right when you last clicked
   **Generate cut plan** — it does **not** shift if the plan gets
@@ -331,57 +371,37 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   baseline, a small "Original: …" note appears under it with a **✕** button
   next to it — click that ✕ to instantly revert just that one cell back to
   its original value. The cell also gets a light highlight while edited.
-  This applies to every row and every column. Reverting **Cut Plan Qty** or
-  **Sewing target per day** also re-derives that row's **Diff** (Cut Plan
-  Qty − Sewing target per day) to match — Diff itself stays freely editable
-  otherwise, it just gets put back in sync specifically when you revert one
-  of the two values it's derived from.
-- **Editing a row's Cut Plan Qty syncs that row's Morning/Afternoon** —
-  whichever shift is currently active for that row (nonzero) is updated to
-  match the new quantity.
-- **A small ⇄ button on each Cut Plan Morning/Afternoon cell moves that
-  row's quantity to the opposite shift** — click it and Morning becomes
-  Afternoon (or vice versa) for that one row. Since this is just another
-  edit, it gets the same **"Original: …" + ✕ revert** treatment as any
-  other cell — click revert on *either* side afterward and both cells
-  return to their true original values together (not just the one you
-  clicked, which would otherwise leave the same quantity duplicated in
-  both cells).
+  This applies to every row and every column. Reverting a Cut Plan
+  quantity, a session target, or Table No. triggers a full recalculation
+  (see below) rather than trying to patch just that one cell — the
+  three-session cascading selection depends on the whole group's state, so
+  it's re-derived properly from the server rather than guessed at in the
+  browser.
 - **Editing a row's Table No. looks up that specific table's real quantity
-  from Tab 1's data** and applies it to that row (Morning/Afternoon,
-  whichever shift was active), then recomputes Cut Plan Qty and Diff for
-  every row sharing that Sewing Line + JobCut - Suffix + Mark Type. This is
-  a direct lookup, not a re-run of table selection — it won't add or drop
-  other tables, it just corrects that one row's quantity for whichever
-  Table No. you typed. If that table doesn't exist for this group (wrong
-  number, or it's already fully Completed), the status area shows an error
-  and the row is left as it was.
-- **Editing Cut Plan Morning or Cut Plan Afternoon directly also
-  recomputes Cut Plan Qty and Diff** for every row in that same group — so
-  hand-adjusting a shift split always keeps the totals honest, whether or
-  not a Table No. edit happened first.
-- **Reverting Table No. also reverts that row's Morning/Afternoon** back to
-  their own original values (not just the Table No. itself), then
-  recomputes the group's Cut Plan Qty/Diff from the reverted numbers — so
-  undoing a Table No. change fully undoes its knock-on effects, not just
-  the number in that one cell.
-- **Reverting Cut Plan Morning or Cut Plan Afternoon recomputes the
-  group's Cut Plan Qty/Diff too.** If that was the only outstanding edit in
-  the group, this brings Qty/Diff fully back to their original totals; if
-  another edit is still present elsewhere in the group, it recalculates
-  against whatever's still there instead of forcing a full revert.
+  from Tab 1's data** and puts it into whichever of the three Cut Plan
+  columns (Morning/Afternoon/OT) that row currently occupies, then triggers
+  a full recalculation. This is different from a normal quantity edit in
+  one respect: it's a direct lookup for a *specific* table you typed in,
+  not a re-run of table selection from scratch — but since Table No. can
+  change which table a row represents entirely, letting the group's Diff
+  values and session assignments recalculate afterward keeps everything
+  consistent. If that table doesn't exist for this group (wrong number, or
+  its Status isn't exactly "Pending"), the status area shows an error and
+  the row is left as it was, but Table No.'s relocation to the correct
+  sorted position still happens either way.
 - **Merged/blank cells never show an "edited" highlight.** A cell that's
   part of a merged block (see below) always looks blank/untouched, even if
   a group recalculation updates its value behind the scenes — the "real"
   edited indicator only ever appears on the top cell of that merged block.
-- **Editing Cut Plan Qty or Sewing target per day re-checks which tables are
-  needed.** This fires automatically once you finish editing the cell
-  (on blur): the model re-runs table selection for that group using the
-  full pool of available (non-completed) tables — pulling in more tables if
-  the new target/quantities need them, or dropping tables once the planned
-  quantity already reaches the target. Any Notes already typed on tables
-  that stay selected are preserved, and each table's "Original" comparison
-  value stays pinned to its true baseline throughout.
+- **Editing any Cut Plan quantity or any session target (Sewing target
+  Morning/Afternoon/OT) re-checks which tables are needed.** This fires
+  automatically once you finish editing the cell (on blur): the model
+  re-runs the same three-session cascading selection for that group using
+  the full pool of available (Status = "Pending") tables — pulling in more
+  tables if a target now needs them, or dropping tables once the planned
+  quantity already reaches every session's target. Any Notes already typed
+  on tables that stay selected are preserved, and each table's "Original"
+  comparison value stays pinned to its true baseline throughout.
 - **+ Add row** adds a blank row **at the top** of that building's table —
   easy to find without scrolling. Fill in its Sewing Line, JobCut - Suffix,
   Mark Type, and Table No. (in that order, tabbing through as normal), and
@@ -420,6 +440,12 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   plan has even been generated — the filtering system works the same way
   everywhere in the app, just applied to read-only tables there instead of
   editable ones.
+- **Every column can be resized** — hover the right edge of a column
+  header (a thin drag handle appears) and drag to widen or narrow it,
+  handy when a value like a longer Sewing Line code gets cut off at the
+  default width. **Double-click that same edge to auto-fit the column** to
+  its widest currently-visible content in one click. This works the same
+  way on **all three tables** (Tab 1, Tab 2, Tab 3), not just Tab 3's.
 - Nothing is saved until you click **Save changes & Download Excel** — this
   regenerates the workbook with your edits and downloads it. Downloaded
   files start directly with the header row (no title/notice rows above it,
@@ -508,21 +534,4 @@ recomputed fresh from Tab 1's data every time), this doesn't affect
 correctness — it just means uploaded files and past sessions don't survive
 a redeploy, same as restarting the app locally.
 
-## Extending Tab 3 to also use the WIP file, once its template is known
 
-Tab 3 currently plans purely from Tab 1's data. When the WIP file's template
-is confirmed:
-
-1. Replace `load_wip_raw()` in `cutplan2/model.py` with a proper
-   `load_wip()` that extracts a fixed set of fields from the WIP file, the
-   same way `load_input()` does for the Buffer Cutting Order Form.
-2. Have `wip_upload()` in `app.py` store the *parsed* WIP data (not just the
-   raw preview) in `SESSIONS[sid]["wip"]`.
-3. Update `build_cut_plan()` in `cutplan2/model.py` to take the WIP
-   DataFrame as a second input and factor it into the planning logic (e.g.
-   cross-checking against actual WIP levels).
-4. Update the `cut_plan()` route in `app.py` to pass `SESSIONS[sid]["wip"]`
-   through alongside the extraction data.
-
-Keeping each tab's logic in its own function/section like this means Tab 3
-can be extended without touching Tabs 1 or 2.

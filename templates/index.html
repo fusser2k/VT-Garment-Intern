@@ -42,7 +42,6 @@
   .run-info { background: #eef3f9; border: 1px solid #cfe0f0; color: #1F4E78; padding: 10px 16px; border-radius: 6px; font-size: 13px; }
   .warn-info { background: #fdecea; border: 1px solid #f3c8c2; color: #b3261e; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .note-info { background: #fff8e6; border: 1px solid #f0dca0; color: #7a5c00; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
-  .wip-override-note { background: #eaf6ec; border: 1px solid #b9e0c0; color: #205c2f; padding: 8px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .flag-notice { display: flex; align-items: flex-start; gap: 12px; background: #eaf4ea; border: 1px solid #b7dbb7; color: #1e5c1e; padding: 10px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 14px; }
   .flag-notice-text { flex: 1; line-height: 1.5; }
   .flag-dismiss-btn { background: none; border: none; color: #1e5c1e; cursor: pointer; font-size: 14px; line-height: 1; padding: 2px 4px; flex-shrink: 0; }
@@ -66,6 +65,9 @@
   table { border-collapse: collapse; width: 100%; font-size: 13px; }
   th, td { border: 1px solid #ddd; padding: 5px 8px; text-align: center; }
   th { background: #1F4E78; color: #fff; position: sticky; top: 0; z-index: 1; }
+  thead tr:first-child th { position: relative; }
+  .col-resize-handle { position: absolute; top: 0; right: 0; width: 6px; height: 100%; cursor: col-resize; z-index: 2; }
+  .col-resize-handle:hover, .col-resize-handle.resizing { background: rgba(255,255,255,0.35); }
   tr.filter-row th { background: #eef3f9; padding: 3px 4px; }
   .col-filter-btn { width: 100%; box-sizing: border-box; border: 1px solid #cfe0f0; border-radius: 3px; padding: 4px 6px; font-size: 12px; font-weight: normal; color: #333; background: #fff; cursor: pointer; text-align: left; }
   .col-filter-btn:hover { border-color: #1F4E78; }
@@ -108,10 +110,6 @@
   .revert-btn { background: none; border: none; color: #1F4E78; cursor: pointer; font-size: 10px; line-height: 1; padding: 0 2px; text-decoration: none; }
   .revert-btn:hover { color: #b3261e; }
   td.edited input { background: #fff8e6; border: 1px solid #f0dca0; }
-  td.shift-qty-cell .shift-qty-row { display: flex; align-items: center; gap: 2px; }
-  td.shift-qty-cell input { flex: 1; min-width: 0; }
-  .swap-shift-btn { background: none; border: 1px solid #cfe0f0; border-radius: 3px; color: #1F4E78; cursor: pointer; font-size: 13px; line-height: 1; padding: 3px 5px; flex-shrink: 0; }
-  .swap-shift-btn:hover { background: #eef3f9; border-color: #1F4E78; }
   .remove-btn { background: none; border: none; color: #b3261e; cursor: pointer; font-size: 15px; line-height: 1; padding: 2px 6px; }
   .remove-btn:hover { text-decoration: underline; }
   .insert-row-below-btn {
@@ -217,7 +215,12 @@
         <input type="text" class="global-search-input" id="extraction-search" placeholder="{{ t('search_placeholder') }}">
       </div>
       <div class="table-wrap">
-        <table>
+        <table id="extraction-table">
+          <colgroup>
+            {% for col in extraction.columns %}
+              <col>
+            {% endfor %}
+          </colgroup>
           <thead>
             <tr>
               {% for col in extraction.columns %}
@@ -301,7 +304,12 @@
         <input type="text" class="global-search-input" id="wip-search" placeholder="{{ t('search_placeholder') }}">
       </div>
       <div class="table-wrap">
-        <table>
+        <table id="wip-table">
+          <colgroup>
+            {% for col in wip.columns %}
+              <col>
+            {% endfor %}
+          </colgroup>
           <thead>
             <tr>
               {% for col in wip.columns %}
@@ -369,17 +377,7 @@
               {% endif %}
               <div class="orig-value"></div>
             </td>
-          {% elif col in ['Cut Plan Qty', 'Diff'] %}
-            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
-          {% elif col in ['Cut Plan Morning', 'Cut Plan Afternoon'] %}
-            <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }} shift-qty-cell">
-              <div class="shift-qty-row">
-                <input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}">
-                <button type="button" class="swap-shift-btn" tabindex="-1" title="{{ t('js_swap_shift') }}">&#8646;</button>
-              </div>
-              <div class="orig-value"></div>
-            </td>
-          {% elif col in ['Sewing target per day', 'Table No.'] %}
+          {% elif col in ['Sewing Target Per Day', 'Table No.', 'Sewing target Morning', 'Cut Plan Morning', 'Diff (Morning)', 'Sewing target Afternoon', 'Cut Plan Afternoon', 'Diff (Afternoon)', 'Sewing target OT', 'Cut Plan OT', 'Diff (OT)'] %}
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="number" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
           {% else %}
             <td data-col="{{ col }}" class="{{ 'continuation-cell' if is_cont else '' }}"><input type="text" value="{{ row[col] }}" data-original="{{ row[col] }}"><div class="orig-value"></div></td>
@@ -408,6 +406,12 @@
     {% if building_data.rows %}
     <div class="table-wrap">
       <table id="cutplan-table-{{ building_key }}">
+        <colgroup>
+          {% for col in cutplan.columns %}
+            <col>
+          {% endfor %}
+          <col> {# trailing action (remove-row) column - not resizable #}
+        </colgroup>
         <thead>
           <tr>
             {% for col in cutplan.columns %}
@@ -467,10 +471,10 @@
         </div>
       </div>
 
-      {% if cutplan.run_info.wip_overridden_lines %}
-      <div class="wip-override-note">
+      {% if cutplan.run_info.lines_missing_wip_targets %}
+      <div class="note-info">
         {{ t('wip_override_note') }}
-        <strong>{{ cutplan.run_info.wip_overridden_lines | join(', ') }}</strong>
+        <strong>{{ cutplan.run_info.lines_missing_wip_targets | join(', ') }}</strong>
       </div>
       {% endif %}
 
@@ -730,6 +734,29 @@
           noMatches.style.display = anyVisible ? "none" : "";
         });
 
+        // Pressing Enter in the search box applies the filter immediately:
+        // every value matching the typed text gets checked (included) and
+        // every non-matching value gets unchecked (excluded), then the
+        // table is refreshed - so the user doesn't have to manually tick
+        // each checkbox after narrowing the list down.
+        searchInput.addEventListener("keydown", (e) => {
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          const needle = searchInput.value.trim().toLowerCase();
+          if (needle === "") return;
+          list.querySelectorAll(".col-filter-item").forEach((item) => {
+            const matches = item.dataset.searchText.includes(needle);
+            const cb = item.querySelector('input[type="checkbox"]');
+            const value = uniqueValues.find(
+              (v) => (v === "" ? T.filter_blank_value : v).toLowerCase() === item.dataset.searchText
+            );
+            cb.checked = matches;
+            if (matches) excluded.delete(value);
+            else excluded.add(value);
+          });
+          applyColumnFilters(tbodyId);
+        });
+
         selectAllBtn.addEventListener("click", () => {
           excluded.clear();
           list.querySelectorAll('input[type="checkbox"]').forEach((cb) => { cb.checked = true; });
@@ -789,17 +816,122 @@
           applyColumnFilters(tbodyId);
         });
       });
+
+    // ---- Column resizing: drag a column's right edge to widen/narrow it;
+    // double-click the same edge to auto-fit that column to its current
+    // content. Works uniformly across all three data tables (each column's
+    // <col> element controls every cell's width in that column at once,
+    // via a shared <colgroup> - far cheaper than resizing every <td>
+    // individually). Runs unconditionally (Tab 1/2's tables don't depend
+    // on Tab 3's cutplan state), one call per table that actually exists
+    // on this page load.
+    function setupColumnResize(table) {
+      if (!table) return;
+      const colgroup = table.querySelector("colgroup");
+      const headerRow = table.querySelector("thead tr:first-child");
+      if (!colgroup || !headerRow) return;
+      const cols = Array.from(colgroup.querySelectorAll("col"));
+      const ths = Array.from(headerRow.querySelectorAll("th"));
+
+      // A shared, reused measuring element for the double-click auto-fit -
+      // appending/removing ONE element and updating its text repeatedly is
+      // far cheaper than creating a fresh element per row, which matters
+      // for a table with thousands of rows (e.g. Tab 1).
+      const measureSpan = document.createElement("span");
+      measureSpan.style.visibility = "hidden";
+      measureSpan.style.position = "absolute";
+      measureSpan.style.whiteSpace = "pre";
+      measureSpan.style.left = "-9999px";
+      measureSpan.style.top = "0";
+
+      ths.forEach((th, idx) => {
+        if (idx >= cols.length) return; // e.g. Tab 3's trailing action column has no <th> here to attach to anyway
+
+        const handle = document.createElement("div");
+        handle.className = "col-resize-handle";
+        th.appendChild(handle);
+
+        let startX = 0;
+        let startWidth = 0;
+
+        function onMouseMove(e) {
+          const delta = e.clientX - startX;
+          cols[idx].style.width = `${Math.max(40, startWidth + delta)}px`;
+        }
+        function onMouseUp() {
+          handle.classList.remove("resizing");
+          document.removeEventListener("mousemove", onMouseMove);
+          document.removeEventListener("mouseup", onMouseUp);
+        }
+        handle.addEventListener("mousedown", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          startX = e.clientX;
+          startWidth = th.getBoundingClientRect().width;
+          handle.classList.add("resizing");
+          document.addEventListener("mousemove", onMouseMove);
+          document.addEventListener("mouseup", onMouseUp);
+        });
+
+        handle.addEventListener("dblclick", (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          document.body.appendChild(measureSpan);
+          let maxWidth = 0;
+
+          measureSpan.style.font = window.getComputedStyle(th).font;
+          measureSpan.textContent = th.textContent.trim();
+          maxWidth = Math.max(maxWidth, measureSpan.offsetWidth);
+
+          const bodyRows = table.querySelectorAll("tbody tr");
+          bodyRows.forEach((tr) => {
+            const td = tr.children[idx];
+            if (!td || td.style.display === "none") return;
+            const input = td.querySelector("input");
+            const contentEl = input || td;
+            const text = input ? input.value : contentEl.textContent;
+            if (!text) return;
+            measureSpan.style.font = window.getComputedStyle(contentEl).font;
+            measureSpan.textContent = text;
+            maxWidth = Math.max(maxWidth, measureSpan.offsetWidth);
+          });
+
+          document.body.removeChild(measureSpan);
+          // Padding allowance for cell/input borders and internal spacing,
+          // plus room for the resize handle itself and (on a filterable
+          // header) the Filter button below it.
+          cols[idx].style.width = `${Math.max(40, maxWidth + 32)}px`;
+        });
+      });
+    }
+
+    setupColumnResize(document.getElementById("extraction-table"));
+    setupColumnResize(document.getElementById("wip-table"));
+
     // ---- Tab 3: Cut Plan — editable tables (Building 1 / Building 2 / Unassigned) ----
     (function () {
       const allTbodies = Array.from(document.querySelectorAll(".cutplan-tbody"));
       if (allTbodies.length === 0) return; // no cut plan generated yet on this page load
 
+      // Tab 3's own tables also get column resizing, one per building.
+      allTbodies.forEach((tb) => setupColumnResize(tb.closest("table")));
+
       const JOB_ID = {{ (cutplan.job_id if cutplan else "") | tojson }};
       const COLUMNS = {{ (cutplan.columns if cutplan else []) | tojson }};
       const GROUP_COLS = ["Sewing Line", "JobCut - Suffix", "Mark Type"];
-      const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"];
-      const NUMERIC_COLS = ["Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"];
-      const RECALC_TRIGGER_COLS = ["Cut Plan Qty", "Sewing target per day"];
+      const MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing Target Per Day", "Sewing target Morning", "Sewing target Afternoon", "Sewing target OT"];
+      const NUMERIC_COLS = ["Sewing Target Per Day", "Table No.", "Sewing target Morning", "Cut Plan Morning", "Diff (Morning)", "Sewing target Afternoon", "Cut Plan Afternoon", "Diff (Afternoon)", "Sewing target OT", "Cut Plan OT", "Diff (OT)"];
+      // Editing any of these triggers a full server recalculation on blur -
+      // the three-session cascading selection (see build_cut_plan() /
+      // recalc_cut_plan() in cutplan2/model.py) isn't something worth
+      // re-deriving correctly in JS, so every column that can change which
+      // tables get selected, or how far into a session they go, defers to
+      // the server rather than attempting an instant client-side update.
+      const RECALC_TRIGGER_COLS = [
+        "Cut Plan Morning", "Cut Plan Afternoon", "Cut Plan OT",
+        "Sewing target Morning", "Sewing target Afternoon", "Sewing target OT",
+      ];
       const BUILDING_1_LINES = {{ building_1_lines | tojson }};
       const BUILDING_2_LINES = {{ building_2_lines | tojson }};
       // T (JS-driven status text/tooltips, in the current session's
@@ -894,26 +1026,11 @@
 
           const startValue = rowData
             ? (rowData[col] !== undefined && rowData[col] !== null ? rowData[col] : "")
-            : (["Cut Plan Qty", "Diff", "Cut Plan Morning", "Cut Plan Afternoon"].includes(col) ? "0" : "");
+            : (["Cut Plan Morning", "Cut Plan Afternoon", "Cut Plan OT", "Diff (Morning)", "Diff (Afternoon)", "Diff (OT)"].includes(col) ? "0" : "");
           input.value = startValue;
           input.dataset.original = baselineEntry ? (baselineEntry[col] ?? startValue) : startValue;
 
-          if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
-            td.classList.add("shift-qty-cell");
-            const row = document.createElement("div");
-            row.className = "shift-qty-row";
-            row.appendChild(input);
-            const swapBtn = document.createElement("button");
-            swapBtn.type = "button";
-            swapBtn.className = "swap-shift-btn";
-            swapBtn.tabIndex = -1;
-            swapBtn.title = T.swap_shift;
-            swapBtn.innerHTML = "&#8646;";
-            row.appendChild(swapBtn);
-            td.appendChild(row);
-          } else {
-            td.appendChild(input);
-          }
+          td.appendChild(input);
 
           if (col === "JobCut - Suffix") {
             const isContJobcut = contFlags && contFlags["JobCut - Suffix"];
@@ -921,7 +1038,7 @@
             if (!isContJobcut && MULTI_DECORATION_KEYS.has(key)) {
               const flagDiv = document.createElement("div");
               flagDiv.className = "decoration-flag";
-              flagDiv.title = "This JobCut has more than one Mark Type needing decoration — you don't have to plan every Mark Type, or plan enough tables to fully reach the Sewing target per day.";
+              flagDiv.title = "This JobCut has more than one Mark Type needing decoration — you don't have to plan every Mark Type, or plan enough tables to fully reach every session's target.";
               const flagText = document.createElement("span");
               flagText.className = "decoration-flag-text";
               flagText.textContent = "\u2691 Multiple Mark Types need decoration";
@@ -969,31 +1086,81 @@
         return tr;
       }
 
+      // Which of the three (Morning/Afternoon/OT) sessions a Cut Plan row
+      // belongs to, inferred the same way as the Python-side _row_session()
+      // in cutplan2/model.py - via which pair of (Cut Plan X, Diff (X))
+      // columns is non-zero.
+      function rowSession(row) {
+        const nz = (v) => { const n = parseFloat(v); return !isNaN(n) && n !== 0; };
+        if (nz(row["Cut Plan Morning"]) || nz(row["Diff (Morning)"])) return "Morning";
+        if (nz(row["Cut Plan Afternoon"]) || nz(row["Diff (Afternoon)"])) return "Afternoon";
+        if (nz(row["Cut Plan OT"]) || nz(row["Diff (OT)"])) return "OT";
+        return null;
+      }
+
       // Rebuild the whole tbody from a fresh list of row dicts (from the server),
       // re-applying the same zebra-striping-per-group, Sewing Line / JobCut
       // divider borders, and merged/blanked-repeat-value styling used on
       // initial render.
+      // Session-target columns are shown ONLY on the first row of their
+      // OWN session within a Mark Type - every other row hides them,
+      // whether that other row is a LATER table in the same session (a
+      // true repeat) or a table in a DIFFERENT session entirely (which
+      // never had that target apply to it). EXCEPTION: a Mark Type group
+      // with only ONE row total (e.g. the oversized-table rule, or simply
+      // a group with only one Pending table) shows ALL THREE targets on
+      // that one row for context - there's no "next row" to show the
+      // others on. Mirrors the Python-side compute_continuation_flags()
+      // in cutplan2/model.py exactly.
+      const SESSION_TARGET_COLS = { Morning: "Sewing target Morning", Afternoon: "Sewing target Afternoon", OT: "Sewing target OT" };
+
+      function groupKeyOf(row) {
+        return `${row["Sewing Line"] ?? ""}|${row["JobCut - Suffix"] ?? ""}|${row["Mark Type"] ?? ""}`;
+      }
+
       function computeContinuationFlags(rows) {
+        const groupSizes = new Map();
+        rows.forEach((row) => {
+          const key = groupKeyOf(row);
+          groupSizes.set(key, (groupSizes.get(key) || 0) + 1);
+        });
+
         const flags = [];
         let prev = null;
+        let seenSessionsThisGroup = new Set();
         rows.forEach((row) => {
           const rowFlags = {};
-          if (!prev) {
-            MERGE_COLUMNS.forEach((c) => { rowFlags[c] = false; });
-          } else {
+          let sameJobcut = false;
+          let sameMarkType = false;
+          if (prev) {
             const sameSewingLine = String(row["Sewing Line"] ?? "") === String(prev["Sewing Line"] ?? "");
-            const sameJobcut = sameSewingLine && String(row["JobCut - Suffix"] ?? "") === String(prev["JobCut - Suffix"] ?? "");
-            const sameMarkType = sameJobcut && String(row["Mark Type"] ?? "") === String(prev["Mark Type"] ?? "");
-            // Sewing Line and JobCut - Suffix show/hide together, so Sewing
-            // Line re-displays at the start of every JobCut, not just once
-            // for the whole Sewing Line block.
-            rowFlags["Sewing Line"] = sameJobcut;
-            rowFlags["JobCut - Suffix"] = sameJobcut;
-            rowFlags["Mark Type"] = sameMarkType;
-            ["Sewing target per day", "Cut Plan Qty", "Diff"].forEach((c) => {
-              rowFlags[c] = sameMarkType && String(row[c] ?? "") === String(prev[c] ?? "");
+            sameJobcut = sameSewingLine && String(row["JobCut - Suffix"] ?? "") === String(prev["JobCut - Suffix"] ?? "");
+            sameMarkType = sameJobcut && String(row["Mark Type"] ?? "") === String(prev["Mark Type"] ?? "");
+          }
+          // Sewing Line and JobCut - Suffix show/hide together, so Sewing
+          // Line re-displays at the start of every JobCut, not just once
+          // for the whole Sewing Line block.
+          rowFlags["Sewing Line"] = sameJobcut;
+          rowFlags["JobCut - Suffix"] = sameJobcut;
+          rowFlags["Mark Type"] = sameMarkType;
+          rowFlags["Sewing Target Per Day"] = sameMarkType;
+
+          if (!sameMarkType) seenSessionsThisGroup = new Set(); // a new Mark Type group starts fresh
+
+          if (groupSizes.get(groupKeyOf(row)) === 1) {
+            Object.values(SESSION_TARGET_COLS).forEach((col) => { rowFlags[col] = false; });
+          } else {
+            const thisSession = rowSession(row);
+            Object.entries(SESSION_TARGET_COLS).forEach(([sessionName, col]) => {
+              if (thisSession === sessionName && !seenSessionsThisGroup.has(sessionName)) {
+                rowFlags[col] = false; // this row's own session, first appearance - show it
+                seenSessionsThisGroup.add(sessionName);
+              } else {
+                rowFlags[col] = true; // wrong session for this row, or already shown once - hide it
+              }
             });
           }
+
           flags.push(rowFlags);
           prev = row;
         });
@@ -1129,135 +1296,40 @@
         }
       }
 
-      // Recompute a row's Diff (= Cut Plan Qty - Sewing target per day) from
-      // its current values, and refresh Diff's own "Original" indicator.
-      function recalcRowDiff(tr) {
-        const qty = numVal(tr, "Cut Plan Qty");
-        const target = numVal(tr, "Sewing target per day");
-        const diffEl = cellInput(tr, "Diff");
-        if (diffEl) {
-          diffEl.value = qty - target;
-          updateOriginalIndicator(diffEl);
-        }
-      }
-
-      // Revert a single cell back to its original value, and update anything
-      // that depends on it (Qty -> Morning/Afternoon sync + their indicators;
-      // Qty/Target -> Diff, since Diff = Qty - Target; Table No. -> also
-      // reverts this row's own Morning/Afternoon, since those were only set
-      // to their current values because of the Table No. that's now being
-      // undone, then refreshes the whole group's Qty/Diff).
+      // Revert a single cell back to its original value. Unlike the old
+      // simple model, this new one's Diff/session-assignment depends on
+      // the WHOLE group's cascading state (see build_cut_plan()), which
+      // isn't something worth re-deriving correctly in JS - so reverting
+      // any cell that matters for planning (a Cut Plan quantity, a
+      // session target, or Table No.) just triggers a full server
+      // recalc afterward, the same as a normal edit to one of those
+      // columns would.
       function revertCell(input) {
         input.value = input.dataset.original ?? "";
         updateOriginalIndicator(input);
 
         const col = input.closest("td")?.getAttribute("data-col");
-        const tr = input.closest("tr");
-
-        if (col === "Cut Plan Qty") {
-          syncRowShiftFromQty(tr);
-          const morningEl = cellInput(tr, "Cut Plan Morning");
-          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-          if (morningEl) updateOriginalIndicator(morningEl);
-          if (afternoonEl) updateOriginalIndicator(afternoonEl);
-        }
-        if (col === "Cut Plan Qty" || col === "Sewing target per day") {
-          recalcRowDiff(tr);
-        }
-        if (col === "Table No.") {
-          const morningEl = cellInput(tr, "Cut Plan Morning");
-          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-          if (morningEl) { morningEl.value = morningEl.dataset.original ?? ""; updateOriginalIndicator(morningEl); }
-          if (afternoonEl) { afternoonEl.value = afternoonEl.dataset.original ?? ""; updateOriginalIndicator(afternoonEl); }
-          recalcGroupQtyDiff(tr);
-        }
-        if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
-          // Morning and Afternoon are a pair - revert BOTH together, not
-          // just the one clicked. Otherwise reverting only one side after
-          // using the swap button would leave the same quantity showing in
-          // both cells at once (an inconsistent, duplicated state).
-          const morningEl = cellInput(tr, "Cut Plan Morning");
-          const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-          if (morningEl) { morningEl.value = morningEl.dataset.original ?? ""; updateOriginalIndicator(morningEl); }
-          if (afternoonEl) { afternoonEl.value = afternoonEl.dataset.original ?? ""; updateOriginalIndicator(afternoonEl); }
-          recalcGroupQtyDiff(tr);
+        if (col === "Table No." || RECALC_TRIGGER_COLS.includes(col)) {
+          recalcFromServer();
         }
       }
 
-      // ---- Requirement: editing a row's Cut Plan Qty updates that same
-      // row's Morning/Afternoon (whichever shift is currently active for it). ----
-      function assignQtyToShift(tr, qty) {
-        const morningEl = cellInput(tr, "Cut Plan Morning");
-        const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-        const hadMorning = numVal(tr, "Cut Plan Morning") > 0;
-        const hadAfternoon = numVal(tr, "Cut Plan Afternoon") > 0;
-
-        if (hadMorning && !hadAfternoon) {
-          if (morningEl) morningEl.value = qty;
-        } else if (hadAfternoon && !hadMorning) {
-          if (afternoonEl) afternoonEl.value = qty;
-        } else {
-          // Both zero (e.g. a brand-new row) or ambiguous (both set) -
-          // default to Morning, matching the single-table default rule.
-          if (morningEl) morningEl.value = qty;
-          if (afternoonEl) afternoonEl.value = 0;
+      // After a Table No. lookup finds a new quantity for this row, park it
+      // in whichever of the three Cut Plan columns this row is CURRENTLY
+      // showing something in (falling back to Morning for a brand-new row
+      // with nothing set yet) - just an interim value. The recalcFromServer()
+      // call that always follows a Table No. change is what actually
+      // re-derives correct Diff values and session assignment for the
+      // whole group.
+      function assignQtyToCurrentSession(tr, qty) {
+        const sessionCols = ["Cut Plan Morning", "Cut Plan Afternoon", "Cut Plan OT"];
+        let targetCol = sessionCols.find((c) => numVal(tr, c) !== 0);
+        if (!targetCol) targetCol = "Cut Plan Morning";
+        const el = cellInput(tr, targetCol);
+        if (el) {
+          el.value = qty;
+          updateOriginalIndicator(el);
         }
-        if (morningEl) updateOriginalIndicator(morningEl);
-        if (afternoonEl) updateOriginalIndicator(afternoonEl);
-      }
-
-      function syncRowShiftFromQty(tr) {
-        assignQtyToShift(tr, numVal(tr, "Cut Plan Qty"));
-      }
-
-      // Recompute Cut Plan Qty / Diff for every row sharing the same Sewing
-      // Line + JobCut - Suffix + Mark Type as tr, from their current
-      // Morning + Afternoon values - used after a Table No. lookup changes
-      // one row's quantity, so the shared group total stays correct.
-      function recalcGroupQtyDiff(tr) {
-        const sewingLine = strVal(tr, "Sewing Line");
-        const jobcutSuffix = strVal(tr, "JobCut - Suffix");
-        const markType = strVal(tr, "Mark Type");
-        const target = numVal(tr, "Sewing target per day");
-        const ownTbody = tr.closest("tbody");
-
-        const groupRows = Array.from(ownTbody.querySelectorAll("tr")).filter((r) =>
-          strVal(r, "Sewing Line") === sewingLine &&
-          strVal(r, "JobCut - Suffix") === jobcutSuffix &&
-          strVal(r, "Mark Type") === markType
-        );
-
-        const total = groupRows.reduce(
-          (sum, r) => sum + numVal(r, "Cut Plan Morning") + numVal(r, "Cut Plan Afternoon"), 0
-        );
-        const diff = total - target;
-
-        groupRows.forEach((r) => {
-          const qtyEl = cellInput(r, "Cut Plan Qty");
-          const diffEl = cellInput(r, "Diff");
-          if (qtyEl) { qtyEl.value = total; updateOriginalIndicator(qtyEl); }
-          if (diffEl) { diffEl.value = diff; updateOriginalIndicator(diffEl); }
-        });
-      }
-
-      // ---- Requirement: a button on Cut Plan Morning/Afternoon moves that
-      // row's quantity to the opposite shift (Morning -> Afternoon or vice
-      // versa). Since this just sets input values the normal way, it gets
-      // the usual "Original: X" + revert (✕) treatment for free - clicking
-      // revert on either cell undoes the swap.
-      function swapRowShift(tr) {
-        const morningEl = cellInput(tr, "Cut Plan Morning");
-        const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-        if (!morningEl || !afternoonEl) return;
-
-        const m = morningEl.value;
-        const a = afternoonEl.value;
-        morningEl.value = a;
-        afternoonEl.value = m;
-
-        updateOriginalIndicator(morningEl);
-        updateOriginalIndicator(afternoonEl);
-        recalcGroupQtyDiff(tr);
       }
 
       // ---- Requirement: editing a row's Table No. looks up that specific
@@ -1317,6 +1389,18 @@
         }
       }
 
+      // Which of the three "Cut Plan X" cells a row's own quantity is
+      // currently showing in (the session it belongs to) - a table
+      // No. lookup needs to put its freshly-fetched quantity into
+      // WHICHEVER session slot this row already occupies, not decide a
+      // session itself (that's the server's job, via the cascading
+      // selection in build_cut_plan()/recalc_cut_plan()).
+      function currentSessionCutPlanCol(tr) {
+        const cols = ["Cut Plan Morning", "Cut Plan Afternoon", "Cut Plan OT"];
+        const found = cols.find((c) => numVal(tr, c) !== 0);
+        return found || "Cut Plan Morning"; // brand-new row with nothing set yet - default to Morning
+      }
+
       // ---- Wire up per-tbody interactions (each building's table gets its
       // own listeners; the actions that must span BOTH buildings - saving,
       // and the full recalc - are wired separately below). ----
@@ -1336,8 +1420,9 @@
 
           try {
             const qty = await lookupTableQty(sewingLine, jobcutSuffix, markType, tableNo);
-            assignQtyToShift(tr, qty);
-            recalcGroupQtyDiff(tr);
+            const cutCol = currentSessionCutPlanCol(tr);
+            const el = cellInput(tr, cutCol);
+            if (el) { el.value = qty; updateOriginalIndicator(el); }
             statusEl.textContent = T.table_qty_updated;
           } catch (err) {
             statusEl.textContent = `${T.error_prefix} ${err.message}`;
@@ -1345,8 +1430,11 @@
           } finally {
             // Table No. changed the row's identity - relocate it to its
             // correct group position, whether or not the qty lookup
-            // succeeded (grouping is still meaningful either way).
+            // succeeded (grouping is still meaningful either way), then
+            // let the server fully recalculate Diff values and session
+            // assignments for the group from scratch.
             resortTbodyRows(tb);
+            recalcFromServer();
           }
         });
 
@@ -1360,12 +1448,13 @@
         // the next (the field about to be focused gets destroyed and
         // recreated out from under the user).
 
-        // Recalculate table selection once the user finishes editing Qty or
-        // Target (fires on blur-after-change, not on every keystroke). Table
-        // No. edits are handled separately above (lookupTableQty), NOT by the
-        // full re-selection here - re-running the greedy smallest-Table-ID
-        // selection would just re-pick the table it normally would and ignore
-        // whatever Table No. the user actually typed.
+        // Recalculate table selection once the user finishes editing a Cut
+        // Plan quantity or a session target (fires on blur-after-change,
+        // not on every keystroke). Table No. edits are handled separately
+        // above (lookupTableQty), NOT by the full re-selection here -
+        // re-running the cascading selection would just re-pick the table
+        // it normally would and ignore whatever Table No. the user
+        // actually typed.
         tb.addEventListener("change", (e) => {
           const col = e.target.closest("td")?.getAttribute("data-col");
           if (RECALC_TRIGGER_COLS.includes(col)) {
@@ -1379,7 +1468,7 @@
         // the revert/remove action below. preventDefault() on mousedown stops
         // the focus change before it happens.
         tb.addEventListener("mousedown", (e) => {
-          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".swap-shift-btn") || e.target.closest(".insert-row-below-btn")) {
+          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".insert-row-below-btn")) {
             e.preventDefault();
           }
         });
@@ -1401,10 +1490,6 @@
             updateRowCount(tb);
             return;
           }
-          if (e.target.closest(".swap-shift-btn")) {
-            swapRowShift(e.target.closest("tr"));
-            return;
-          }
           if (e.target.closest(".revert-btn")) {
             const td = e.target.closest("td");
             const input = td ? td.querySelector("input") : null;
@@ -1412,27 +1497,13 @@
           }
         });
 
-        // Live sync: Qty -> Morning/Afternoon, as the user types. Also
-        // show/hide the "Original: X" indicator for whatever field was
-        // edited.
+        // Just show/hide the "Original: X" indicator as the user types -
+        // actual recalculation (Diff values, session assignment) only
+        // happens once they finish editing (see the "change" listener
+        // above), since it depends on the whole group's cascading state.
         tb.addEventListener("input", (e) => {
           if (e.target.tagName !== "INPUT") return;
-          const col = e.target.closest("td")?.getAttribute("data-col");
-
           updateOriginalIndicator(e.target);
-
-          if (col === "Cut Plan Qty") {
-            syncRowShiftFromQty(e.target.closest("tr"));
-            const tr = e.target.closest("tr");
-            const morningEl = cellInput(tr, "Cut Plan Morning");
-            const afternoonEl = cellInput(tr, "Cut Plan Afternoon");
-            if (morningEl) updateOriginalIndicator(morningEl);
-            if (afternoonEl) updateOriginalIndicator(afternoonEl);
-          }
-
-          if (col === "Cut Plan Morning" || col === "Cut Plan Afternoon") {
-            recalcGroupQtyDiff(e.target.closest("tr"));
-          }
         });
       });
 

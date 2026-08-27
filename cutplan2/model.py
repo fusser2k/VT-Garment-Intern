@@ -17,6 +17,8 @@ from zoneinfo import ZoneInfo
 import json
 import math
 import os
+import unicodedata
+from collections import Counter
 
 import pandas as pd
 import openpyxl
@@ -428,6 +430,19 @@ def load_wip(path_or_buffer) -> pd.DataFrame:
             row_data["Lead Time Afternoon Health"] = classify_lead_time(
                 row_data.get("Lead Time Afternoon (hrs)"), is_merged_block
             )
+            # The source file's own "Sewing Line Code" (column A) isn't
+            # always filled in - when it's blank or doesn't look like a
+            # real code, recognize it instead from this row's own "Sewing
+            # Line" Thai name/team text (see match_sewing_line_code()),
+            # so the column is still populated either way. A genuine code
+            # already present in the file is always kept as-is and never
+            # overridden by the Thai-name guess.
+            code_raw = row_data.get("Sewing Line Code")
+            code_str = str(code_raw).strip() if code_raw is not None else ""
+            if not code_str or not code_str.upper().startswith("VS"):
+                recognized_code = match_sewing_line_code(row_data.get("Sewing Line"))
+                if recognized_code:
+                    row_data["Sewing Line Code"] = recognized_code
             rows_out.append(row_data)
 
     return pd.DataFrame(rows_out, columns=WIP_COLUMNS)
@@ -494,17 +509,97 @@ def load_wip_raw(path_or_buffer) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+# Sewing Line code -> the "root" Thai name/team label as it actually
+# appears at the START of that line's row in Tab 2's WIP report "Sewing
+# Line" column (before any trailing "/", "+", extra number, or nothing at
+# all). These are two entirely different naming systems for the same
+# physical sewing lines - Tab 1 uses codes like "VSEW012", Tab 2 identifies
+# lines by the supervisor/team's Thai name instead (e.g. "ราตรี"). There's
+# no way to derive one from the other programmatically, so this mapping is
+# hardcoded here. Update it if a line's assigned supervisor/team changes.
+SEWING_LINE_THAI_ROOTS = {
+    "VSEW001": "วารินทร์",
+    "VSEW002": "นิภาพร",
+    "VSEW003": "พิไลย์",
+    "VSEW004": "วงเดือน",
+    "VSEW005": "จินตนา",
+    "VSEW006": "ชุติมันต์",
+    "VSEW007": "ส้ม",
+    "VSEW008": "นวลจันทร์",
+    "VSEW009": "สัมฤทธิ์",
+    "VSEW010": "นิชารัศ",
+    "VSEW011": "สุพิศ",
+    "VSEW012": "ราตรี",
+    "VSEW013": "สายรุ้ง",
+    "VSEW014": "รำไพ",
+    "VSEW015": "ปัญญาพร",
+    "VSEW016": "อรอนงค์",
+    "VSEW017": "สำราญ",
+    "VSEW018": "VSEW018 ผ้าพันคอ",  # this line's WIP row literally spells out its own code
+}
+
+# Merged-line codes (two individual lines sharing one combined sewing
+# line): recognized when the row's Sewing Line text contains BOTH
+# constituent lines' Thai roots (e.g. "นิภาพร + ชุติมันต์" -> VS02+06,
+# since "02" and "06" are VSEW002 and VSEW006's own numbers).
+SEWING_LINE_MERGED_ROOTS = {
+    "VS02+06": ("VSEW002", "VSEW006"),
+    "VS08+11": ("VSEW008", "VSEW011"),
+}
+
+
+def _normalize_thai_text(s) -> str:
+    """Collapse whitespace and strip, for tolerant Thai-name matching.
+    Also applies Unicode NFC normalization - the same-looking Thai text can
+    be encoded with combining marks (tone marks, vowels) stored in a
+    different order depending on the source, which otherwise silently
+    breaks exact/prefix matching even though the text is visually
+    identical."""
+    return " ".join(unicodedata.normalize("NFC", str(s)).split())
+
+
+def match_sewing_line_code(thai_text) -> Optional[str]:
+    """Recognize which Tab 1 Sewing Line code (e.g. "VSEW012") a Tab 2 WIP
+    row's own "Sewing Line" text (e.g. "ราตรี /", "ราตรี", or "ราตรี 2")
+    corresponds to, mainly by its Thai name - tolerant of the name ending
+    without a trailing "/", or ending with a number, or nothing extra at
+    all after the name.
+
+    Checks merged-line patterns FIRST (most specific - e.g. "นิภาพร +
+    ชุติมันต์" must resolve to VS02+06, not be mistaken for just VSEW002
+    because its text happens to start with "นิภาพร" too), then falls back
+    to a single-line prefix match. Returns None if nothing matches.
+    """
+    if thai_text is None:
+        return None
+    normalized = _normalize_thai_text(thai_text)
+    if not normalized:
+        return None
+
+    for merged_code, (code_a, code_b) in SEWING_LINE_MERGED_ROOTS.items():
+        root_a = SEWING_LINE_THAI_ROOTS[code_a]
+        root_b = SEWING_LINE_THAI_ROOTS[code_b]
+        if root_a in normalized and root_b in normalized:
+            return merged_code
+
+    for code, root in SEWING_LINE_THAI_ROOTS.items():
+        if normalized.startswith(root):
+            return code
+
+    return None
+
+
 def compute_wip_target_overrides(wip_df: pd.DataFrame) -> dict:
     """From an already-extracted Tab 2 WIP DataFrame (see load_wip()),
     build {Sewing Line code: Target for Day (with OT)}.
 
-    Matched purely via the WIP report's own "Sewing Line Code" column
-    (extracted from column A of the source file, per row) - only codes
-    that actually start with "VS" are used, so any row where that column
-    is blank or holds something else (a descriptive label, a stray note,
-    etc.) is simply skipped rather than guessed at. Tab 2's separate
-    "Sewing Line" column (the Thai supervisor/team name) is not used for
-    matching at all.
+    Reads the "Sewing Line Code" column directly - load_wip() already
+    backfills that column via Thai-name recognition (see
+    match_sewing_line_code() / SEWING_LINE_THAI_ROOTS above) for any row
+    where the source file's own column A was blank or unusable, so by the
+    time this function runs every row that CAN be identified already has a
+    code here, whether it came from the file itself or was recognized from
+    its Thai name.
 
     Lines with no usable code, or no numeric target value, are simply
     absent from the returned dict - callers should fall back to Tab 1's
@@ -533,85 +628,99 @@ def compute_wip_target_overrides(wip_df: pd.DataFrame) -> dict:
     return overrides
 
 
+def compute_wip_session_targets(wip_df: pd.DataFrame) -> dict:
+    """From an already-extracted Tab 2 WIP DataFrame (see load_wip()),
+    build {Sewing Line code: (Target Morning, Target Afternoon, Target OT)}
+    - the per-session targets Tab 3's planning is built around (see
+    build_cut_plan()). Matched the same way as compute_wip_target_overrides()
+    (via the "Sewing Line Code" column, which load_wip() already backfills
+    via Thai-name recognition when the source file's own column A is
+    blank).
+
+    A line WITH a matching row in the WIP data, but a missing/non-numeric
+    value for just one of the three target columns, gets 0 for that
+    specific missing piece while keeping the other two real values (never
+    raises). A line with NO matching row at all simply has no entry in the
+    returned dict - build_cut_plan() treats that as "no Tab 2 coverage" and
+    skips planning that Sewing Line entirely, rather than guessing with a
+    (0, 0, 0) fallback.
+
+    Returns {} if wip_df is None, empty, or missing the expected columns
+    (e.g. an unstructured/raw-preview WIP file) - never raises.
+    """
+    if wip_df is None or len(wip_df) == 0:
+        return {}
+    required = {"Sewing Line Code", "Target Morning", "Target Afternoon", "Target OT"}
+    if not required.issubset(wip_df.columns):
+        return {}
+
+    targets = {}
+    for _, row in wip_df.iterrows():
+        code_raw = row.get("Sewing Line Code")
+        if code_raw is None:
+            continue
+        code = str(code_raw).strip()
+        if not code or not code.upper().startswith("VS"):
+            continue
+        m = pd.to_numeric(row.get("Target Morning"), errors="coerce")
+        a = pd.to_numeric(row.get("Target Afternoon"), errors="coerce")
+        ot = pd.to_numeric(row.get("Target OT"), errors="coerce")
+        targets[code] = (
+            float(m) if pd.notna(m) else 0.0,
+            float(a) if pd.notna(a) else 0.0,
+            float(ot) if pd.notna(ot) else 0.0,
+        )
+
+    return targets
+
+
 CUT_PLAN_COLUMNS = [
     "Sewing Line",
     "JobCut - Suffix",
-    "Sewing target per day",
-    "Cut Plan Qty",
-    "Diff",
+    "Sewing Target Per Day",
     "Mark Type",
     "Table No.",
+    "Sewing target Morning",
     "Cut Plan Morning",
+    "Diff (Morning)",
+    "Sewing target Afternoon",
     "Cut Plan Afternoon",
+    "Diff (Afternoon)",
+    "Sewing target OT",
+    "Cut Plan OT",
+    "Diff (OT)",
     "Note",
 ]
 
-
-def split_morning_afternoon(selected: list) -> dict:
-    """Decide, for one (Sewing Line, JobCut - Suffix, Mark Type) group's
-    already-selected tables (in ascending Table ID order), which of Cut
-    Plan Morning / Cut Plan Afternoon each table's quantity goes into.
-
-    Rule:
-      - Exactly one table selected -> its whole quantity goes to Morning,
-        by default.
-      - More than one table selected -> split into a "top" part (Morning)
-        and a "bottom" part (Afternoon): walk the tables in order, keeping
-        each one in the top/Morning part and accumulating its quantity,
-        until the running total reaches HALF OF THE GROUP'S CUT PLAN QTY
-        (the total quantity actually being allocated across this same
-        Mark Type + JobCut - NOT half of Sewing Target Per Day, since the
-        selected tables don't always add up anywhere near the target - the
-        split still has to happen even when the group is nowhere near its
-        target). The table whose addition reaches that halfway point is
-        still part of the top/Morning part; every table AFTER that point
-        goes to the bottom/Afternoon part. When the total can't be split
-        into two exactly equal halves, this naturally puts the LARGER
-        portion in Morning and the smaller one in Afternoon, since the
-        crossing table stays in the top/Morning part.
-      - Whenever there's more than one table, SOME split always happens -
-        if one large table (usually the last one in Table ID order) is big
-        enough that the halfway point isn't crossed until it's added,
-        leaving nothing for Afternoon, that table is moved to Afternoon
-        instead so the group isn't left entirely in Morning. (This is the
-        one case where the larger side can end up in Afternoon rather than
-        Morning - guaranteeing an actual split takes priority here.)
-
-    `selected` is a list of (table_id, qty) tuples, already in the order
-    they were selected (ascending Table ID). Returns {table_id: (morning, afternoon)}.
-    """
-    if len(selected) <= 1:
-        return {tid: (qty, 0) for tid, qty in selected}
-
-    total_qty = sum(qty for _, qty in selected)
-    half_total = total_qty / 2
-    running = 0
-    crossed_half = False
-    result = {}
-    for tid, qty in selected:
-        if not crossed_half:
-            result[tid] = (qty, 0)
-            running += qty
-            if running >= half_total:
-                crossed_half = True
-        else:
-            result[tid] = (0, qty)
-
-    # Guarantee an actual split whenever there's more than one table: if the
-    # halfway point wasn't crossed until the very last table, everything
-    # would otherwise land in Morning with nothing in Afternoon.
-    if all(afternoon == 0 for _, afternoon in result.values()):
-        last_tid, last_qty = selected[-1]
-        result[last_tid] = (0, last_qty)
-
-    return result
+# The three (session name, target column, cut-plan column, diff column)
+# tuples, in the fixed order tables get planned into: a group's tables are
+# planned entirely into Morning until that session's running Diff turns
+# non-negative, then Afternoon takes over the same way, then OT. See
+# build_cut_plan()/recalc_cut_plan() for exactly how this drives selection.
+CUT_PLAN_SESSIONS = [
+    ("Morning", "Sewing target Morning", "Cut Plan Morning", "Diff (Morning)"),
+    ("Afternoon", "Sewing target Afternoon", "Cut Plan Afternoon", "Diff (Afternoon)"),
+    ("OT", "Sewing target OT", "Cut Plan OT", "Diff (OT)"),
+]
 
 
 def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
     """Convert a list of row dicts (as submitted from the editable Cut Plan
     table in the browser) back into a properly-typed plan DataFrame, ready
     to be written out with write_cut_plan_workbook()."""
-    int_cols = {"Sewing target per day", "Cut Plan Qty", "Diff", "Table No.", "Cut Plan Morning", "Cut Plan Afternoon"}
+    int_cols = {
+        "Sewing Target Per Day",
+        "Table No.",
+        "Sewing target Morning",
+        "Cut Plan Morning",
+        "Diff (Morning)",
+        "Sewing target Afternoon",
+        "Cut Plan Afternoon",
+        "Diff (Afternoon)",
+        "Sewing target OT",
+        "Cut Plan OT",
+        "Diff (OT)",
+    }
 
     def to_int(v):
         try:
@@ -632,30 +741,30 @@ def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
     return pd.DataFrame(cleaned, columns=CUT_PLAN_COLUMNS)
 
 
-def _candidate_table_pool(df: pd.DataFrame, wip_target_overrides: Optional[dict] = None) -> pd.DataFrame:
-    """Shared step for build_cut_plan() and recalc_cut_plan(): drop completed
-    colorway rows, then combine Qty across colorways sharing a Table ID.
-    Returns one row per (Sewing Line, JobCut - Suffix, Mark Type, Table ID).
+def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
+    """Shared step for build_cut_plan() and recalc_cut_plan(): drop
+    non-Pending colorway rows, then combine Qty across colorways sharing a
+    Table ID. Returns one row per (Sewing Line, JobCut - Suffix, Mark Type,
+    Table ID).
 
-    wip_target_overrides (optional): {Sewing Line code: target value}, from
-    compute_wip_target_overrides() against Tab 2's WIP data. Where a Sewing
-    Line has an entry here, its Target comes from THAT (Tab 2's own
-    per-line "Target for Day (with OT)") instead of Tab 1's Sewing Target
-    Per Day (with OT) column - overriding it, since different sewing lines
-    can have different actual daily targets that Tab 1's extracted data
-    alone doesn't capture. Lines with no override entry keep using Tab 1's
-    value, so this degrades gracefully when Tab 2 hasn't been uploaded, or
-    doesn't cover every line.
+    Selection is purely status-based: only a colorway row whose Status is
+    exactly "Pending" is eligible for planning - "Completed" AND
+    "In Progress" are both excluded (not just "Completed"). There is no
+    separate date-based eligibility window on top of this (an earlier
+    revision added a Start Cut / FG Start Date window; that's been removed
+    since it was excluding tables that should still be planned).
+
+    Per-session Morning/Afternoon/OT targets are looked up separately per
+    Sewing Line (see compute_wip_session_targets()) - this function no
+    longer carries a single "Target" column, since planning now needs three
+    numbers per group instead of one.
     """
     work = df.copy()
     work["Qty"] = pd.to_numeric(work["Qty"], errors="coerce").fillna(0)
     work["Table ID"] = pd.to_numeric(work["Table ID"], errors="coerce")
-    work["Sewing Target Per Day (with OT)"] = pd.to_numeric(
-        work["Sewing Target Per Day (with OT)"], errors="coerce"
-    ).fillna(0)
 
     status_norm = work["Status"].astype(str).str.strip().str.lower()
-    work = work[status_norm != "completed"]
+    work = work[status_norm == "pending"]
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     table_cols = group_cols + ["Table ID"]
@@ -665,25 +774,28 @@ def _candidate_table_pool(df: pd.DataFrame, wip_target_overrides: Optional[dict]
         .agg(
             Combined_Qty=("Qty", "sum"),
             Colorway_Count=("Colorway", "nunique"),
-            Target=("Sewing Target Per Day (with OT)", "max"),
         )
         .reset_index()
     )
-
-    if wip_target_overrides:
-        override_series = table_level["Sewing Line"].map(wip_target_overrides)
-        table_level["Target"] = override_series.combine_first(table_level["Target"])
     return table_level
 
 
-MERGE_COLUMNS = ["Sewing Line", "JobCut - Suffix", "Mark Type", "Sewing target per day", "Cut Plan Qty", "Diff"]
+MERGE_COLUMNS = [
+    "Sewing Line",
+    "JobCut - Suffix",
+    "Mark Type",
+    "Sewing Target Per Day",
+    "Sewing target Morning",
+    "Sewing target Afternoon",
+    "Sewing target OT",
+]
 
 # Which physical building each Sewing Line's cutting work happens in. Used to
 # split the Cut Plan into two separate output tables/sheets: "Building 1"
 # and "Building 2". A Sewing Line not listed here falls into "Unassigned"
 # (kept, not dropped, so nothing silently disappears from the plan).
-BUILDING_1_LINES = ["VSEW001", "VSEW002", "VSEW003", "VSEW004", "VSEW005", "VSEW007", "VSEW015", "VS02+06"]
-BUILDING_2_LINES = ["VSEW006", "VSEW009", "VSEW010", "VSEW012", "VSEW013", "VSEW014", "VSEW016", "VSEW017", "VSEW018", "VS08+11"]
+BUILDING_1_LINES = ["VSEW001", "VSEW002", "VSEW003", "VSEW004", "VSEW005", "VSEW007", "VSEW008", "VSEW015", "VSEW018", "VS02+06"]
+BUILDING_2_LINES = ["VSEW006", "VSEW009", "VSEW010", "VSEW011", "VSEW012", "VSEW013", "VSEW014", "VSEW016", "VSEW017", "VS08+11"]
 
 
 def get_building(sewing_line) -> str:
@@ -739,6 +851,67 @@ def split_plan_by_building(plan_df: pd.DataFrame) -> "dict[str, pd.DataFrame]":
     return result
 
 
+def _row_session(row):
+    """Which of the three (Morning/Afternoon/OT) sessions this Cut Plan
+    row belongs to, inferred from which pair of (Cut Plan X, Diff (X))
+    columns is non-zero - each planned row belongs to exactly one session
+    by construction (see build_cut_plan()/recalc_cut_plan()). Returns None
+    for a row where none of the three pairs has anything yet (e.g. a
+    freshly manually-added blank row the user hasn't filled in)."""
+    def _nz(v):
+        try:
+            return float(v) != 0
+        except (TypeError, ValueError):
+            return False
+
+    if _nz(row.get("Cut Plan Morning")) or _nz(row.get("Diff (Morning)")):
+        return "Morning"
+    if _nz(row.get("Cut Plan Afternoon")) or _nz(row.get("Diff (Afternoon)")):
+        return "Afternoon"
+    if _nz(row.get("Cut Plan OT")) or _nz(row.get("Diff (OT)")):
+        return "OT"
+    return None
+
+
+def _session_target_merge_ranges(rows):
+    """For each of the three session-target columns, compute the list of
+    (start_idx, end_idx) row-index ranges (inclusive, 0-based into `rows`)
+    that should be TRUE merged in the Excel output.
+
+    Deliberately NOT derived from compute_continuation_flags()'s booleans -
+    those only say "hide/show this one cell" and don't distinguish WHY a
+    cell is hidden (a genuine continuation of the same group's same session,
+    vs. simply being the wrong session for that column entirely). Naively
+    merging every consecutive "hidden" run together would incorrectly span
+    a merge across two unrelated blocks that just happen to both be hidden.
+    This function instead walks the same (Mark Type group, session)
+    structure directly, so a range is only ever produced for rows that are
+    ACTUALLY the same group continuing the same session.
+    """
+    session_cols = {"Morning": "Sewing target Morning", "Afternoon": "Sewing target Afternoon", "OT": "Sewing target OT"}
+    ranges = {col: [] for col in session_cols.values()}
+
+    group_keys = [f"{r.get('Sewing Line', '')}|{r.get('JobCut - Suffix', '')}|{r.get('Mark Type', '')}" for r in rows]
+    sessions = [_row_session(r) for r in rows]
+
+    for session_name, col in session_cols.items():
+        run_start = None
+        run_group = None
+        for idx in range(len(rows)):
+            matches = sessions[idx] == session_name
+            if matches and run_start is not None and group_keys[idx] == run_group:
+                continue  # extend the current run
+            # the current run (if any) has ended - close it out
+            if run_start is not None and idx - 1 > run_start:
+                ranges[col].append((run_start, idx - 1))
+            run_start = idx if matches else None
+            run_group = group_keys[idx] if matches else None
+        if run_start is not None and len(rows) - 1 > run_start:
+            ranges[col].append((run_start, len(rows) - 1))
+
+    return ranges
+
+
 def compute_continuation_flags(rows) -> list:
     """For each row, figure out - per merge-eligible column - whether it
     repeats the row above and should therefore be visually merged with it
@@ -750,11 +923,28 @@ def compute_continuation_flags(rows) -> list:
         way Sewing Line re-displays at the start of every JobCut, not just
         once for the whole Sewing Line block - easier to read which JobCut
         a given block belongs to.
-      - Mark Type merges with the row above only within the same JobCut.
-      - Sewing target per day, Cut Plan Qty and Diff merge with the row
-        above only within the same JobCut AND the same Mark Type - so they
-        re-display at the start of every Mark Type sub-block, even if the
-        value happens to coincide with the previous Mark Type's value.
+      - Mark Type and Sewing Target Per Day merge with the row above only
+        within the same JobCut AND (for Sewing Target Per Day) the same
+        Mark Type - so they re-display at the start of every Mark Type
+        sub-block.
+      - Sewing target Morning/Afternoon/OT are shown ONLY on the first row
+        of their OWN session within a Mark Type - every other row hides
+        them, whether that other row is a LATER table in the same session
+        (a true repeat) or a table in a DIFFERENT session entirely (which
+        never had that target apply to it in the first place). build_cut_plan()/
+        recalc_cut_plan() store the group's full target on every row
+        regardless of session (consistent with how every other merge-eligible
+        column works), so this function is what actually limits each target
+        to appearing once, on the session's first table.
+      - EXCEPTION: a Mark Type group with only ONE row total (e.g. the
+        oversized-table rule in build_cut_plan(), where a single table more
+        than double the Morning target stops the whole group right there, or
+        simply a group with only one Pending table) shows ALL THREE session
+        targets on that one row, not just the one matching its own session -
+        there's no "next row" to show the others on, and seeing all three
+        gives useful context (e.g. confirming Morning alone already covers
+        far more than a full day's targets, so Afternoon/OT genuinely aren't
+        needed).
 
     rows: list of dicts (same shape as CUT_PLAN_COLUMNS rows), already
     sorted by Sewing Line -> JobCut - Suffix -> Mark Type -> Table No.
@@ -762,31 +952,56 @@ def compute_continuation_flags(rows) -> list:
     Returns a list (same length as rows) of {column: bool} - True means
     "this cell repeats the row above, merge/blank it".
     """
+    session_target_cols = {"Morning": "Sewing target Morning", "Afternoon": "Sewing target Afternoon", "OT": "Sewing target OT"}
+
+    def group_key_of(row):
+        return f"{row.get('Sewing Line', '')}|{row.get('JobCut - Suffix', '')}|{row.get('Mark Type', '')}"
+
+    group_sizes = Counter(group_key_of(r) for r in rows)
+
     flags = []
     prev = None
+    seen_sessions_this_group = set()
     for row in rows:
         row_flags = {}
         if prev is None:
-            for col in MERGE_COLUMNS:
-                row_flags[col] = False
+            same_jobcut = False
+            same_mark_type = False
         else:
             same_sewing_line = str(row.get("Sewing Line", "")) == str(prev.get("Sewing Line", ""))
             same_jobcut = same_sewing_line and str(row.get("JobCut - Suffix", "")) == str(prev.get("JobCut - Suffix", ""))
             same_mark_type = same_jobcut and str(row.get("Mark Type", "")) == str(prev.get("Mark Type", ""))
 
-            row_flags["Sewing Line"] = same_jobcut
-            row_flags["JobCut - Suffix"] = same_jobcut
-            row_flags["Mark Type"] = same_mark_type
-            for col in ["Sewing target per day", "Cut Plan Qty", "Diff"]:
-                row_flags[col] = same_mark_type and str(row.get(col, "")) == str(prev.get(col, ""))
+        row_flags["Sewing Line"] = same_jobcut
+        row_flags["JobCut - Suffix"] = same_jobcut
+        row_flags["Mark Type"] = same_mark_type
+        row_flags["Sewing Target Per Day"] = same_mark_type
+
+        if not same_mark_type:
+            seen_sessions_this_group = set()  # a new Mark Type group starts fresh
+
+        if group_sizes[group_key_of(row)] == 1:
+            for col in session_target_cols.values():
+                row_flags[col] = False  # this group's only row - show all three targets for context
+        else:
+            this_session = _row_session(row)
+            for session_name, col in session_target_cols.items():
+                if this_session == session_name and session_name not in seen_sessions_this_group:
+                    row_flags[col] = False  # this row's own session, and its first appearance - show it
+                    seen_sessions_this_group.add(session_name)
+                else:
+                    row_flags[col] = True  # wrong session for this row, or already shown once - hide it
+
         flags.append(row_flags)
         prev = row
     return flags
 
 
-
-def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None, wip_target_overrides: Optional[dict] = None):
-    """Build the Tab 3 cut plan from Tab 1's extracted DataFrame.
+def build_cut_plan(df: pd.DataFrame, wip_session_targets: dict, run_datetime: Optional[datetime] = None):
+    """Build the Tab 3 cut plan from Tab 1's extracted DataFrame, using
+    Tab 2's per-Sewing-Line Morning/Afternoon/OT targets (see
+    compute_wip_session_targets()) to decide how far into the day each
+    group's tables get planned.
 
     Rules:
       1. Completed tables are excluded from planning. Status is recorded
@@ -796,28 +1011,48 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None, wi
       2. Multiple colorways can share the same Table ID within a
          (Sewing Line, JobCut - Suffix, Mark Type) group — their Qty is
          combined into one figure per table before planning.
-      3. Within each (Sewing Line, JobCut - Suffix, Mark Type) group,
-         tables are planned smallest Table ID first, adding tables in that
-         order until the running combined Qty reaches (or first exceeds)
-         that group's Sewing Target Per Day - which comes from Tab 2's WIP
-         data (its own per-line "Target for Day (with OT)") wherever
-         wip_target_overrides has an entry for that Sewing Line, and from
-         Tab 1's Sewing Target Per Day (with OT) column otherwise. See
-         compute_wip_target_overrides() for how that override mapping is
-         built and _candidate_table_pool() for exactly where it's applied.
-      4. Cut Plan Morning / Cut Plan Afternoon is decided per group, from
-         the selected tables' quantities alone - see split_morning_afternoon():
-         a single selected table goes entirely to Morning; with more than
-         one, tables are split into a "top" (Morning) part and a "bottom"
-         (Afternoon) part based on where the running quantity crosses half
-         of the group's own Cut Plan Qty (the total quantity actually being
-         allocated across the selected tables - not half of Sewing Target
-         Per Day, which the selected tables don't always add up anywhere
-         near).
+      3. Within each group, tables are planned smallest Table ID first,
+         one session at a time (Morning, then Afternoon, then OT):
+           - Keep a running "Diff" = (total Qty planned in this group so
+             far, across every table/session) minus (the sum of every
+             session's target UP TO AND INCLUDING the one currently being
+             filled). Diff starts using just the Morning target; the
+             moment a table's addition pushes it non-negative (>= 0),
+             that table is the LAST one for the current session — the
+             NEXT table moves into the next session (Afternoon, then OT),
+             and cumulative target jumps up by that whole session's
+             target immediately.
+           - Once OT's Diff also goes non-negative, or all three sessions
+             have been used, the group stops — any remaining tables for
+             that group stay pending for a future run, not force-fit into
+             an already-full day.
+      3b. EXCEPTION - oversized tables: if a table's own Qty is more than
+          double the group's Morning target, AND the group hasn't yet
+          moved past Morning (no earlier table's Diff has turned
+          non-negative), that table isn't split across sessions at all -
+          its FULL Qty goes into Cut Plan Morning alone (Diff (Morning) =
+          cumulative Qty so far including this table, minus the Morning
+          target), and the ENTIRE GROUP stops planning right there - no
+          further tables from that group are planned this run, regardless
+          of which session would otherwise be next. (Only applies when the
+          Morning target is actually known/nonzero, and only while still
+          in the Morning session - a group with no WIP coverage at all
+          just runs the normal cascading rule instead, and an oversized
+          table encountered after the group has already moved on to
+          Afternoon/OT is planned normally into whichever session it's
+          actually in.)
+      4. A Sewing Line with no matching row in Tab 2's WIP data is skipped
+         entirely - no rows are planned for it at all this run, rather than
+         falling back to some default. Tab 2 coverage is required for a
+         line to be planned; run_info["lines_missing_wip_targets"] lists
+         exactly which lines (present in Tab 1's data, candidates for
+         planning) had no WIP coverage and were skipped, so the UI can
+         surface this clearly instead of silently producing an
+         incomplete-looking plan.
 
     Returns (plan_df, run_info).
     """
-    table_level = _candidate_table_pool(df, wip_target_overrides=wip_target_overrides)
+    table_level = _candidate_table_pool(df)
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     # Sort candidates by Sewing Line -> JobCut - Suffix -> Mark Type -> Table ID
@@ -825,73 +1060,108 @@ def build_cut_plan(df: pd.DataFrame, run_datetime: Optional[datetime] = None, wi
     # (matches the reference planning sheet's layout).
     table_level = table_level.sort_values(group_cols + ["Table ID"]).reset_index(drop=True)
     output_rows = []
+    lines_missing_targets = set()
 
     for keys, g in table_level.groupby(group_cols, sort=False, dropna=False):
         sewing_line, jobcut_suffix, mark_type = keys
-        # Round UP to a whole number immediately - a fractional target (e.g.
-        # from a WIP override like 412.8) should never make the group look
-        # like it needs less than it actually does. Using this same rounded
-        # value for the selection cutoff below (not the raw fractional one)
-        # keeps everything downstream self-consistent: the displayed
-        # Sewing target per day, the table-selection cutoff, and Diff all
-        # agree with each other.
-        target = math.ceil(g["Target"].max())
-        # Rule 3: smallest Table ID first.
+
+        raw_targets = wip_session_targets.get(sewing_line)
+        if raw_targets is None:
+            # No Tab 2 coverage for this Sewing Line at all - skip planning
+            # it entirely this run, rather than guessing with a (0, 0, 0)
+            # fallback that would otherwise show every one of its tables as
+            # immediately over target.
+            lines_missing_targets.add(sewing_line)
+            continue
+        target_morning = math.ceil(raw_targets[0])
+        target_afternoon = math.ceil(raw_targets[1])
+        target_ot = math.ceil(raw_targets[2])
+        # Round the TOTAL once, rather than summing the three already-rounded
+        # session targets - ceil(a)+ceil(b)+ceil(c) can overshoot ceil(a+b+c)
+        # by a couple of units purely from rounding each fractional part up
+        # separately (e.g. Morning 144.0 + Afternoon 153.6 + OT 115.2 =
+        # 412.8, which should round up to 413 - but 144+154+116 = 414).
+        sewing_target_per_day = math.ceil(raw_targets[0] + raw_targets[1] + raw_targets[2])
+
+        sessions = [
+            (target_morning, "Cut Plan Morning", "Diff (Morning)"),
+            (target_afternoon, "Cut Plan Afternoon", "Diff (Afternoon)"),
+            (target_ot, "Cut Plan OT", "Diff (OT)"),
+        ]
+        cumulative_target_upto = []
+        running_target = 0
+        for t, _, _ in sessions:
+            running_target += t
+            cumulative_target_upto.append(running_target)
+
+        def blank_row(table_id, qty_for_col=None):
+            row = {
+                "Sewing Line": sewing_line,
+                "JobCut - Suffix": jobcut_suffix,
+                "Sewing Target Per Day": int(sewing_target_per_day),
+                "Mark Type": mark_type,
+                "Table No.": table_id,
+                "Sewing target Morning": int(target_morning),
+                "Cut Plan Morning": 0,
+                "Diff (Morning)": 0,
+                "Sewing target Afternoon": int(target_afternoon),
+                "Cut Plan Afternoon": 0,
+                "Diff (Afternoon)": 0,
+                "Sewing target OT": int(target_ot),
+                "Cut Plan OT": 0,
+                "Diff (OT)": 0,
+                "Note": "",  # left blank - purely for the user's own manual comments
+            }
+            return row
+
         g_sorted = g.sort_values("Table ID", ascending=True).reset_index(drop=True)
 
-        cum = 0
-        selected = []
+        cumulative_qty = 0
+        session_idx = 0
+
         for _, row in g_sorted.iterrows():
-            if cum >= target:
-                break
-            cum += row["Combined_Qty"]
+            if session_idx >= len(sessions):
+                break  # all 3 sessions exhausted - remaining tables stay pending
+
             table_id = int(row["Table ID"]) if pd.notna(row["Table ID"]) else ""
-            selected.append((table_id, int(row["Combined_Qty"])))
+            qty = int(row["Combined_Qty"])
 
-        cut_plan_qty = cum
-        diff = cut_plan_qty - target
+            if session_idx == 0 and target_morning > 0 and qty > 2 * target_morning:
+                out = blank_row(table_id)
+                out["Cut Plan Morning"] = qty
+                out["Diff (Morning)"] = int(cumulative_qty + qty - target_morning)
+                output_rows.append(out)
+                break  # stop the whole group - this table isn't split further
 
-        split = split_morning_afternoon(selected)
+            cumulative_qty += qty
+            diff = cumulative_qty - cumulative_target_upto[session_idx]
+            _, cut_col, diff_col = sessions[session_idx]
 
-        for table_id, qty in selected:
-            morning, afternoon = split[table_id]
+            out = blank_row(table_id)
+            out[cut_col] = qty
+            out[diff_col] = int(diff)
+            output_rows.append(out)
 
-            output_rows.append(
-                {
-                    "Sewing Line": sewing_line,
-                    "JobCut - Suffix": jobcut_suffix,
-                    "Sewing target per day": int(target),
-                    "Cut Plan Qty": int(cut_plan_qty),
-                    "Diff": int(diff),
-                    "Mark Type": mark_type,
-                    "Table No.": table_id,
-                    "Cut Plan Morning": morning,
-                    "Cut Plan Afternoon": afternoon,
-                    "Note": "",  # left blank - purely for the user's own manual comments
-                }
-            )
+            if diff >= 0:
+                session_idx += 1
 
     plan_df = pd.DataFrame(output_rows, columns=CUT_PLAN_COLUMNS)
-    overridden_lines_in_plan = (
-        sorted(set(plan_df["Sewing Line"].unique()) & set(wip_target_overrides.keys()))
-        if wip_target_overrides
-        else []
-    )
     run_info = {
         "run_datetime": run_datetime or now_th(),
         "plan_date": (run_datetime or now_th()).date(),
-        # Which Sewing Lines in THIS plan actually got their target
-        # overridden by Tab 2's WIP data (see compute_wip_target_overrides())
-        # - purely informational, so Tab 3's UI can show the user this
-        # happened rather than silently changing numbers underneath them.
-        "wip_overridden_lines": overridden_lines_in_plan,
+        # Sewing Lines that had candidate tables in Tab 1's data but no
+        # matching row in Tab 2's WIP data at all - these were skipped
+        # entirely (see rule 4 above), so they'll never appear in plan_df
+        # itself. Purely informational, so Tab 3's UI can flag exactly
+        # which lines need Tab 2 coverage before they can be planned.
+        "lines_missing_wip_targets": sorted(lines_missing_targets),
     }
     return plan_df, run_info
 
 
 def lookup_table_qty(source_df: pd.DataFrame, sewing_line: str, jobcut_suffix: str, mark_type, table_id: int):
     """Look up a single table's TRUE combined quantity (colorways combined,
-    completed colorways excluded) straight from the source data - used when
+    non-Pending colorways excluded) straight from the source data - used when
     the user directly edits a row's Table No., so that row's quantity gets
     replaced with the real number for whichever table they typed in,
     instead of keeping the previous table's leftover value.
@@ -912,34 +1182,34 @@ def lookup_table_qty(source_df: pd.DataFrame, sewing_line: str, jobcut_suffix: s
 
 
 def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict):
-    """Re-run table selection after the user has edited Cut Plan Qty and/or
-    Sewing target per day on the (already generated) Tab 3 table.
+    """Re-run table selection after the user has edited a Cut Plan Qty
+    cell and/or a session target cell on the (already generated) Tab 3
+    table.
 
     For each (Sewing Line, JobCut - Suffix, Mark Type) group present in
     current_rows:
-      - The group's target is whatever the user's rows currently show for
-        Sewing target per day (max across that group's rows).
-      - Each candidate table's quantity is the user's edited Cut Plan Qty for
-        that table if that table is currently on the page, otherwise the
-        original combined Qty from the source data (tables the user never
-        saw/touched).
-      - Tables are re-selected smallest Table ID first, accumulating until
-        the (possibly new) target is reached/exceeded — exactly like
-        build_cut_plan(), just against the edited numbers. This can both
-        ADD tables (target raised, or an edited qty lowered the running
-        total) and DROP tables (target lowered, or an edited qty raised the
+      - Each of the three session targets (Morning/Afternoon/OT) is
+        whatever the user's rows currently show for that column (max
+        across the group's rows) - re-derived fresh each time, so editing
+        any of them re-triggers the same cascading selection
+        build_cut_plan() uses.
+      - Each candidate table's quantity is the user's edited quantity for
+        that table (summed across whichever of the three Cut Plan
+        columns it's showing something in) if that table is currently on
+        the page, otherwise the original combined Qty from the source
+        data (tables the user never saw/touched).
+      - Tables are re-selected smallest Table ID first, using the exact
+        same session-by-session cascading rule and oversized-table
+        exception as build_cut_plan() - this can both ADD tables (a
+        target raised, or an edited qty lowered the running total) and
+        DROP tables (a target lowered, or an edited qty raised the
         running total past it sooner).
       - Manual comments already typed into Note are preserved for tables
         that remain selected.
       - Rows for tables the user manually added (a Table No. that doesn't
-        exist in the source data for that group) are always kept as-is
-        (their own Morning/Afternoon split is never recomputed), and their
-        Cut Plan Qty is added into the group's total/Diff.
-      - Cut Plan Morning / Cut Plan Afternoon for the REAL (non-manual)
-        selected tables is always freshly recomputed for the whole group
-        using split_morning_afternoon() - the same deterministic rule
-        build_cut_plan() uses - since the split boundary (half the target)
-        can shift whenever the target or a table's quantity changes.
+        exist in the source data for that group) are always kept exactly
+        as typed - their own Cut Plan Morning/Afternoon/OT and Diff values
+        are never recomputed.
 
     Returns a fresh plan_df (same columns/shape as build_cut_plan's output).
     """
@@ -969,22 +1239,35 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
 
     for key, user_rows in rows_by_group.items():
         sewing_line, jobcut_suffix, mark_type = key
-        # Round UP for the same reason as build_cut_plan() - a user could
-        # type in a fractional target directly, and it should never make the
-        # group look like it needs less than it actually does.
-        target = math.ceil(max((to_num(r.get("Sewing target per day")) for r in user_rows), default=0.0))
+        # Round UP for the same reason as build_cut_plan() - the user could
+        # type in a fractional target directly, and it should never make
+        # the group look like it needs less than it actually does.
+        target_morning = math.ceil(max((to_num(r.get("Sewing target Morning")) for r in user_rows), default=0.0))
+        target_afternoon = math.ceil(max((to_num(r.get("Sewing target Afternoon")) for r in user_rows), default=0.0))
+        target_ot = math.ceil(max((to_num(r.get("Sewing target OT")) for r in user_rows), default=0.0))
+        # Preserve whatever's already in the user's current rows for Sewing
+        # Target Per Day, rather than re-deriving it from the three
+        # (already-rounded) session targets above - this function only ever
+        # sees whole-number session targets (no raw fractional WIP data to
+        # work from), so summing them would reproduce the same over-rounding
+        # bug build_cut_plan() avoids by rounding the raw total once. The
+        # value was already computed correctly there; recalculating a plan
+        # shouldn't silently drift it to a different number.
+        sewing_target_per_day = int(max((to_num(r.get("Sewing Target Per Day")) for r in user_rows), default=0.0))
 
         candidates = candidates_by_group.get(key)
 
-        # Build override map: Table ID (int) -> user's current Cut Plan Qty for
-        # that row, and preserve any Note text already on that row. Also collect
-        # rows whose Table No. isn't a real candidate for this group — manually
-        # added extras. A row only counts as an override if it has an EXPLICIT
-        # Morning/Afternoon value; if both are blank (e.g. the user just
-        # changed which Table No. this row points to, so its old
-        # Morning/Afternoon no longer means anything), it's treated as having
-        # no known quantity yet, and falls back to that table's real quantity
-        # from the source data instead of incorrectly reusing a stale value.
+        # Build override map: Table ID (int) -> user's current Qty for that
+        # row (summed across whichever of the three Cut Plan columns it's
+        # showing something in), and preserve any Note text already on
+        # that row. Also collect rows whose Table No. isn't a real
+        # candidate for this group — manually added extras. A row only
+        # counts as an override if it has an EXPLICIT quantity somewhere;
+        # if all three Cut Plan columns are blank (e.g. the user just
+        # changed which Table No. this row points to, so its old values no
+        # longer mean anything), it's treated as having no known quantity
+        # yet, and falls back to that table's real quantity from the
+        # source data instead of incorrectly reusing a stale value.
         qty_override = {}
         note_by_table = {}
         manual_rows = []
@@ -1002,54 +1285,87 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
 
             morning_raw = r.get("Cut Plan Morning", "")
             afternoon_raw = r.get("Cut Plan Afternoon", "")
+            ot_raw = r.get("Cut Plan OT", "")
             has_known_qty = not (
                 (morning_raw is None or str(morning_raw).strip() == "")
                 and (afternoon_raw is None or str(afternoon_raw).strip() == "")
+                and (ot_raw is None or str(ot_raw).strip() == "")
             )
 
             if is_real_candidate:
                 note_by_table[table_id] = r.get("Note", "")
                 if has_known_qty:
-                    qty_override[table_id] = to_num(morning_raw) + to_num(afternoon_raw)
+                    qty_override[table_id] = to_num(morning_raw) + to_num(afternoon_raw) + to_num(ot_raw)
             else:
                 manual_rows.append(r)
 
-        selected_real_rows = []
-        real_total = 0
+        sessions = [
+            (target_morning, "Cut Plan Morning", "Diff (Morning)"),
+            (target_afternoon, "Cut Plan Afternoon", "Diff (Afternoon)"),
+            (target_ot, "Cut Plan OT", "Diff (OT)"),
+        ]
+        cumulative_target_upto = []
+        running_target = 0
+        for t, _, _ in sessions:
+            running_target += t
+            cumulative_target_upto.append(running_target)
+
+        selected_rows_out = []
 
         if candidates is not None and len(candidates) > 0:
             g_sorted = candidates.sort_values("Table ID", ascending=True).reset_index(drop=True)
-            cum = 0
+            cumulative_qty = 0
+            session_idx = 0
+
             for _, crow in g_sorted.iterrows():
-                if cum >= target:
-                    break
+                if session_idx >= len(sessions):
+                    break  # all 3 sessions exhausted - remaining tables stay pending
+
                 table_id = int(crow["Table ID"]) if pd.notna(crow["Table ID"]) else None
-                qty = qty_override.get(table_id, crow["Combined_Qty"])
-                cum += qty
-                selected_real_rows.append((table_id, int(qty)))
-            real_total = cum
+                qty = int(qty_override.get(table_id, crow["Combined_Qty"]))
 
-        manual_total = sum(to_num(r.get("Cut Plan Morning")) + to_num(r.get("Cut Plan Afternoon")) for r in manual_rows)
-        cut_plan_qty = real_total + manual_total
-        diff = cut_plan_qty - target
+                blank = {
+                    "table_id": table_id,
+                    "Cut Plan Morning": 0, "Diff (Morning)": 0,
+                    "Cut Plan Afternoon": 0, "Diff (Afternoon)": 0,
+                    "Cut Plan OT": 0, "Diff (OT)": 0,
+                }
 
-        split = split_morning_afternoon(selected_real_rows)
+                if session_idx == 0 and target_morning > 0 and qty > 2 * target_morning:
+                    blank["Cut Plan Morning"] = qty
+                    blank["Diff (Morning)"] = int(cumulative_qty + qty - target_morning)
+                    selected_rows_out.append(blank)
+                    break  # stop the whole group - this table isn't split further
 
-        for table_id, qty in selected_real_rows:
-            morning, afternoon = split[table_id]
+                cumulative_qty += qty
+                diff = cumulative_qty - cumulative_target_upto[session_idx]
+                _, cut_col, diff_col = sessions[session_idx]
+                blank[cut_col] = qty
+                blank[diff_col] = int(diff)
+                selected_rows_out.append(blank)
+
+                if diff >= 0:
+                    session_idx += 1
+
+        for row_out in selected_rows_out:
+            table_id = row_out["table_id"]
             note = note_by_table.get(table_id, "")
-
             output_rows.append(
                 {
                     "Sewing Line": sewing_line,
                     "JobCut - Suffix": jobcut_suffix,
-                    "Sewing target per day": int(target),
-                    "Cut Plan Qty": int(cut_plan_qty),
-                    "Diff": int(diff),
+                    "Sewing Target Per Day": int(sewing_target_per_day),
                     "Mark Type": mark_type,
                     "Table No.": table_id,
-                    "Cut Plan Morning": int(morning),
-                    "Cut Plan Afternoon": int(afternoon),
+                    "Sewing target Morning": int(target_morning),
+                    "Cut Plan Morning": row_out["Cut Plan Morning"],
+                    "Diff (Morning)": row_out["Diff (Morning)"],
+                    "Sewing target Afternoon": int(target_afternoon),
+                    "Cut Plan Afternoon": row_out["Cut Plan Afternoon"],
+                    "Diff (Afternoon)": row_out["Diff (Afternoon)"],
+                    "Sewing target OT": int(target_ot),
+                    "Cut Plan OT": row_out["Cut Plan OT"],
+                    "Diff (OT)": row_out["Diff (OT)"],
                     "Note": note,
                 }
             )
@@ -1059,13 +1375,18 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
                 {
                     "Sewing Line": sewing_line,
                     "JobCut - Suffix": jobcut_suffix,
-                    "Sewing target per day": int(target),
-                    "Cut Plan Qty": int(cut_plan_qty),
-                    "Diff": int(diff),
+                    "Sewing Target Per Day": int(sewing_target_per_day),
                     "Mark Type": mark_type,
                     "Table No.": r.get("Table No.", ""),
+                    "Sewing target Morning": int(target_morning),
                     "Cut Plan Morning": int(to_num(r.get("Cut Plan Morning"))),
+                    "Diff (Morning)": int(to_num(r.get("Diff (Morning)"))),
+                    "Sewing target Afternoon": int(target_afternoon),
                     "Cut Plan Afternoon": int(to_num(r.get("Cut Plan Afternoon"))),
+                    "Diff (Afternoon)": int(to_num(r.get("Diff (Afternoon)"))),
+                    "Sewing target OT": int(target_ot),
+                    "Cut Plan OT": int(to_num(r.get("Cut Plan OT"))),
+                    "Diff (OT)": int(to_num(r.get("Diff (OT)"))),
                     "Note": r.get("Note", ""),
                 }
             )
@@ -1082,14 +1403,16 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
 # into the downloaded Excel files (the "Logic & Assumptions" sheet was
 # removed) - kept here purely as an in-code reference for anyone reading
 # the source, describing the same logic implemented in build_cut_plan()/
-# recalc_cut_plan()/split_morning_afternoon() below.
+# recalc_cut_plan() below.
 CUT_PLAN_ASSUMPTIONS_TEXT = [
     "CUT PLANNING MODEL v2 — TAB 3: CUT PLAN",
     "",
     "1. INPUT",
-    "Built directly from Tab 1's extracted Buffer Cutting Order Form data (already filtered to",
-    "Sewing Lines starting with \"VS\"). Tab 2 (WIP Upload) is NOT used yet — see the note on the",
-    "Cut Plan tab.",
+    "Built from Tab 1's extracted Buffer Cutting Order Form data (already filtered to Sewing",
+    "Lines starting with \"VS\"), using Tab 2's (WIP Upload) per-Sewing-Line Morning/Afternoon/OT",
+    "targets to decide how far into the day each group's tables get planned. A Sewing Line with",
+    "no matching row in Tab 2's WIP data is skipped entirely this run - Tab 2 coverage is",
+    "required for a line to be planned.",
     "",
     "2. COMPLETED TABLES ARE EXCLUDED",
     "Status is recorded per colorway row. Any row with Status = \"Completed\" is dropped before",
@@ -1105,29 +1428,28 @@ CUT_PLAN_ASSUMPTIONS_TEXT = [
     "Left blank by the model. It's only filled in if the user types something into it manually",
     "on the editable Cut Plan tab (e.g. a manual adjustment reason) before saving.",
     "",
-    "4. TABLE SELECTION RULE",
+    "4. TABLE SELECTION RULE: THREE SESSIONS, CASCADING",
     "Within each (Sewing Line, JobCut - Suffix, Mark Type) group, tables are planned SMALLEST",
-    "Table ID first. Tables are added in that order until the running combined Qty reaches (or",
-    "first exceeds) the group's Sewing Target Per Day. Only the selected tables appear in the",
-    "output.",
+    "Table ID first, one session at a time - Morning, then Afternoon, then OT. A running Diff =",
+    "(total Qty planned in the group so far, across every table/session) minus (the sum of every",
+    "session's target up to and including the one currently being filled). The moment a table's",
+    "addition pushes that Diff to zero or above, that table is the LAST one for the current",
+    "session - the next table moves into the next session, and the cumulative target immediately",
+    "jumps up by that whole next session's target. Once OT's Diff also reaches zero or above, or",
+    "all three sessions have been used, the group stops - any remaining tables for that group stay",
+    "pending for a future run rather than being force-fit into an already-full day.",
     "",
-    "5. Cut Plan Qty / Diff",
-    "Cut Plan Qty = sum of combined Qty across all tables selected for that group (repeated on",
-    "each row of the group for readability). Diff = Cut Plan Qty - Sewing Target Per Day.",
+    "5. EXCEPTION: OVERSIZED TABLES",
+    "If a table's own Qty is more than double the group's Morning target, AND the group hasn't yet",
+    "moved past Morning (no earlier table's Diff has turned non-negative), that table isn't split",
+    "across sessions at all - its full Qty goes into Cut Plan Morning alone, and the entire group",
+    "stops planning right there. An oversized table encountered after the group has already moved",
+    "on to Afternoon/OT is planned normally into whichever session it's actually in.",
     "",
-    "6. MORNING / AFTERNOON SPLIT",
-    "Decided per group, from the selected tables' quantities alone - no wall-clock time or user",
-    "choice is involved:",
-    "  - If a group has exactly ONE selected table, its whole quantity goes to Cut Plan Morning.",
-    "  - If a group has MORE THAN ONE selected table, they're split into a \"top\" part (Morning)",
-    "    and a \"bottom\" part (Afternoon): walking the tables in Table ID order, each table stays",
-    "    in the top/Morning part and its quantity accumulates, until the running total reaches",
-    "    half of the group's own CUT PLAN QTY (the total quantity actually being allocated across",
-    "    the selected tables - NOT half of Sewing Target Per Day). The table whose addition",
-    "    crosses that halfway point is still counted in the top/Morning part; every table AFTER",
-    "    that point goes to the bottom/Afternoon part. When the total can't split into two exactly",
-    "    equal halves, the larger portion lands in Morning and the smaller one in Afternoon.",
-    "See split_morning_afternoon() in cutplan2/model.py for the exact logic.",
+    "6. CUT PLAN MORNING/AFTERNOON/OT AND DIFF (MORNING)/(AFTERNOON)/(OT)",
+    "Each table belongs to exactly ONE session - its own Qty appears in that session's Cut Plan",
+    "column, with the other two sessions' Cut Plan columns left at 0 for that row. The",
+    "corresponding Diff column shows the running Diff at that point (see rule 4).",
 ]
 
 
@@ -1216,7 +1538,20 @@ def _write_cut_plan_sheet(ws, plan_df: pd.DataFrame, title_text: str, edited_at:
                     c.alignment = center
 
         # ---- Apply true cell merges for repeated values in MERGE_COLUMNS ----
-        for col_name in MERGE_COLUMNS:
+        # The three session-target columns need their OWN merge-range logic
+        # (see _session_target_merge_ranges()) rather than the simple
+        # "any consecutive hidden run merges with the row above it" approach
+        # used for the other merge columns below. That simple approach
+        # breaks for these three specifically: a row hidden because it's the
+        # WRONG session for that column can sit right next to a row hidden
+        # because it's a genuine continuation of a DIFFERENT group's same
+        # session - naively merging every consecutive "hidden" run together
+        # would incorrectly span the merge across a Mark Type/group boundary
+        # it has nothing to do with.
+        session_target_cols = {"Sewing target Morning", "Sewing target Afternoon", "Sewing target OT"}
+        simple_merge_cols = [c for c in MERGE_COLUMNS if c not in session_target_cols]
+
+        for col_name in simple_merge_cols:
             j = col_index[col_name]
             run_start = None
             for idx, flags in enumerate(continuation_flags):
@@ -1233,7 +1568,15 @@ def _write_cut_plan_sheet(ws, plan_df: pd.DataFrame, title_text: str, edited_at:
                 if run_end > run_start:
                     ws.merge_cells(start_row=run_start, start_column=j, end_row=run_end, end_column=j)
 
-    widths = [12, 16, 18, 12, 8, 10, 10, 15, 16, 46]
+        for col_name, ranges in _session_target_merge_ranges(rows_as_dicts).items():
+            j = col_index[col_name]
+            for start_idx, end_idx in ranges:
+                ws.merge_cells(
+                    start_row=header_row + 1 + start_idx, start_column=j,
+                    end_row=header_row + 1 + end_idx, end_column=j,
+                )
+
+    widths = [12, 16, 16, 10, 8, 14, 12, 11, 14, 12, 11, 14, 12, 11, 46]
     for j, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(j)].width = w
 
