@@ -224,7 +224,25 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    only its non-Pending colorway's quantity is dropped; the Pending
    colorway(s) are still planned. Both "Completed" **and** "In Progress"
    are excluded — this is stricter than just excluding Completed alone.
-2. **A Sewing Line with no matching row in Tab 2's WIP data is skipped
+2. **Only JobCuts mentioned in that Sewing Line's own Tab 2 "Detail
+   Morning" / "Detail Afternoon" / "Detail OT" cells are planned.** These
+   free-text cells list which specific JobCuts/tables that line is actually
+   working on that day (e.g. `"26-0388-2 T.8=180"`) — a JobCut's own code is
+   always exactly the **first 9 characters** of its line within the cell
+   (`DD-DDDD-D`, e.g. `26-0388-2`), whether or not a space follows it, and
+   a cell can list several tables across several lines. A JobCut a line's
+   Detail cells don't mention at all isn't planned for that line, even if
+   it has otherwise-eligible Pending tables — and a line whose Detail cells
+   are entirely blank that day has **nothing** planned for it. This
+   restriction is matched **per Sewing Line** (not globally) — a JobCut
+   mentioned under one line's Detail cells doesn't unlock it for a
+   different line. See `extract_jobcuts_from_detail()` /
+   `compute_wip_jobcut_restrictions()` in `cutplan2/model.py` for the exact
+   logic. If a WIP file doesn't include Detail columns at all (an older
+   template), this restriction simply isn't applied — planning falls back
+   to every Pending table for that line, exactly as before this rule
+   existed.
+3. **A Sewing Line with no matching row in Tab 2's WIP data is skipped
    entirely this run** — none of its tables get planned at all, rather than
    guessing with a made-up target. A note on Tab 3's results lists exactly
    which Sewing Lines were skipped this way, so it's never a silent gap.
@@ -237,9 +255,9 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    numbers) are handled the same way. Update
    `SEWING_LINE_THAI_ROOTS`/`SEWING_LINE_MERGED_ROOTS` in
    `cutplan2/model.py` if a line's assigned supervisor/team changes.
-3. **Colorways sharing a Table ID are combined** into one quantity for that
+4. **Colorways sharing a Table ID are combined** into one quantity for that
    table before planning.
-4. **Tables are planned smallest Table ID first, one session at a time —
+5. **Tables are planned smallest Table ID first, one session at a time —
    Morning, then Afternoon, then OT.** A running **Diff** = (total quantity
    planned in the group so far, across every table and session) minus (the
    sum of every session's target up to and including the one currently
@@ -282,7 +300,7 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    computed as the ceiling of the raw fractional total instead, so it
    matches Tab 2's own "Target for Day (with OT)" figure rounded up exactly
    once.
-5. **Exception — oversized tables:** if a table's own Qty is more than
+6. **Exception — oversized tables:** if a table's own Qty is more than
    double the group's Morning target, **and** the group hasn't yet moved
    past Morning (no earlier table's Diff has turned non-negative), that
    table isn't split across sessions at all — its full Qty goes into Cut
@@ -292,14 +310,14 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    on to Afternoon/OT is planned normally into whichever session it's
    actually in — this exception only applies to the group's still-in-Morning
    phase.
-6. **Note always starts blank, for every table.** The
+7. **Note always starts blank, for every table.** The
    model never writes anything into it automatically; it's reserved
    entirely for the user's own manual comments, added on the
    editable table before saving.
-7. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
+8. **Sorted by Sewing Line → JobCut - Suffix → Mark Type → Table No.**, both
    on the page and in the downloaded Excel — matching the reference
    planning sheet's layout.
-8. **Repeated values are merged, not repeated**, at three different levels
+9. **Repeated values are merged, not repeated**, at three different levels
    of granularity:
    - Sewing Line and JobCut - Suffix show/hide together, re-displaying at
      the start of every JobCut (not merged across a whole Sewing Line
@@ -328,7 +346,7 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    column, and Note are never merged — they stay one row per table. This
    sort/merge/border grouping is re-applied after every recalculation too,
    not just on the initial "Generate cut plan".
-9. **Split into two tables by building**, based on Sewing Line — "Building 1
+10. **Split into two tables by building**, based on Sewing Line — "Building 1
    of `<date>`" and "Building 2 of `<date>`", shown as two separate tables
    on the page and downloaded as two **separate Excel files** (plus a third
    "Unassigned" file if any Sewing Line doesn't match either list — kept,
@@ -336,13 +354,13 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
    actually click Save/Download, not the plan's target date. The building
    lists live in `BUILDING_1_LINES` / `BUILDING_2_LINES` at the top of
    `cutplan2/model.py` — edit those if a Sewing Line's building changes.
-10. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
+11. **A dismissible reminder banner** on Tab 3 notes that if a JobCut has
     more than one Mark Type needing decoration, you don't have to plan
     every Mark Type or plan enough tables to fully reach every session's
     target — partial planning is fine. Click the ✕ on the banner to
     dismiss it; this is purely a one-time on-page reminder, not saved or
     synced anywhere.
-11. **Which specific JobCuts that applies to is flagged directly in the
+12. **Which specific JobCuts that applies to is flagged directly in the
     table.** Using Tab 1's `Decoration` field, any JobCut with more than one
     Mark Type marked `Decoration = Yes` gets a small amber
     "⚑ Multiple Mark Types need decoration" badge under its JobCut - Suffix
@@ -439,7 +457,16 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   tables** (alongside their own search box), independent of whether a cut
   plan has even been generated — the filtering system works the same way
   everywhere in the app, just applied to read-only tables there instead of
-  editable ones.
+  editable ones. **Tab 1 and Tab 2's search box and column filters combine
+  with each other, rather than one overriding the other** — filtering a
+  column and then also typing a search term narrows the results further
+  (both restrictions apply together), and clearing the search text
+  correctly falls back to whatever the column filter alone was already
+  showing, not the full unfiltered table. The search box also treats
+  multiple words as **separate terms joined with AND**, matched anywhere
+  in the row rather than as one literal phrase — searching `VS02+06
+  Pending` finds rows containing both words, even though they sit in
+  different, non-adjacent columns.
 - **Every column can be resized** — hover the right edge of a column
   header (a thin drag handle appears) and drag to widen or narrow it,
   handy when a value like a longer Sewing Line code gets cut off at the

@@ -34,6 +34,7 @@ from cutplan2 import (
     write_wip_workbook,
     build_cut_plan,
     compute_wip_session_targets,
+    compute_wip_jobcut_restrictions,
     recalc_cut_plan,
     lookup_table_qty,
     write_cut_plan_workbook,
@@ -294,6 +295,11 @@ def wip_upload():
     # targets), so it's computed once here rather than on every /cut-plan
     # request.
     session_targets = compute_wip_session_targets(df) if structured else {}
+    # Same idea for which JobCuts each Sewing Line's own Detail Morning /
+    # Detail Afternoon / Detail OT cells actually mention - see
+    # compute_wip_jobcut_restrictions(). Tab 3 only plans a JobCut a line's
+    # own Detail cells list, when this restriction is available.
+    jobcut_restrictions = compute_wip_jobcut_restrictions(df) if structured else {}
 
     SESSIONS[sid]["wip"] = {
         "now": now_th(),
@@ -306,6 +312,7 @@ def wip_upload():
         "structured": structured,
         "download_filename": download_filename,
         "session_targets": session_targets,
+        "jobcut_restrictions": jobcut_restrictions,
     }
     return _render(active_tab=2)
 
@@ -340,11 +347,14 @@ def cut_plan():
         flash(translate("run_tab2_first", _get_lang()))
         return redirect(url_for("index", tab=3))
     wip_session_targets = wip_session.get("session_targets") or {}
+    wip_jobcut_restrictions = wip_session.get("jobcut_restrictions") or {}
 
     run_datetime = now_th()
 
     try:
-        plan_df, run_info = build_cut_plan(extraction["df"], wip_session_targets, run_datetime)
+        plan_df, run_info = build_cut_plan(
+            extraction["df"], wip_session_targets, run_datetime, wip_jobcut_restrictions=wip_jobcut_restrictions
+        )
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:
         flash(f"Error while building the cut plan: {e}")

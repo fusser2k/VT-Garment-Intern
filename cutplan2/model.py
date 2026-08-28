@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 import json
 import math
 import os
+import re
 import unicodedata
 from collections import Counter
 
@@ -674,6 +675,82 @@ def compute_wip_session_targets(wip_df: pd.DataFrame) -> dict:
     return targets
 
 
+# A JobCut - Suffix code is always exactly this shape: two digits, a dash,
+# four digits, a dash, one digit (e.g. "26-0388-2") - always exactly the
+# first 9 characters of a WIP Detail cell's line, whether or not a space
+# follows it (e.g. "25-0621-1T.8,=60" is still "25-0621-1" + "T.8,=60").
+_JOBCUT_PATTERN = re.compile(r"^\d{2}-\d{4}-\d")
+
+
+def extract_jobcuts_from_detail(text) -> set:
+    """Extract every JobCut - Suffix code mentioned in a WIP Detail Morning /
+    Detail Afternoon / Detail OT cell's text. A cell can list multiple
+    tables across multiple lines (e.g. "26-0388-2 T.8=180\\n26-0388-2
+    T.11=180"); each line's own JobCut code is always its first 9
+    characters. A line whose first 9 characters don't match that shape
+    (blank, pure descriptive text, too short, etc.) is simply skipped
+    rather than guessed at.
+
+    Returns an empty set for blank/missing/malformed text - never raises.
+    """
+    if text is None:
+        return set()
+    text = str(text)
+    if not text.strip():
+        return set()
+
+    found = set()
+    for line in text.splitlines():
+        line = line.strip()
+        candidate = line[:9]
+        if _JOBCUT_PATTERN.match(candidate):
+            found.add(candidate)
+    return found
+
+
+def compute_wip_jobcut_restrictions(wip_df: pd.DataFrame) -> dict:
+    """From an already-extracted Tab 2 WIP DataFrame (see load_wip()),
+    build {Sewing Line code: set of JobCut - Suffix codes} - the JobCuts
+    that line's own Detail Morning / Detail Afternoon / Detail OT cells
+    actually mention. build_cut_plan() only plans, for each Sewing Line,
+    tables whose JobCut - Suffix is in that line's own set here - a line
+    with an EMPTY set (its Detail cells were blank, or mentioned nothing
+    recognizable) has nothing planned for it, matching "only the JobCuts
+    written in Detail Morning/Afternoon/OT should be planned".
+
+    Matched the same way as compute_wip_session_targets() (via the "Sewing
+    Line Code" column). Every Sewing Line Code found gets an entry in the
+    returned dict - even one mapping to an empty set - so callers can tell
+    "this line IS covered by Tab 2, it just has no JobCuts listed" apart
+    from "Tab 2 doesn't cover this line at all" (a key that's simply
+    absent), which is decided separately via compute_wip_session_targets().
+
+    Returns {} if wip_df is None, empty, or missing the expected columns
+    (e.g. an unstructured/raw-preview WIP file, or an older WIP template
+    without Detail columns) - never raises.
+    """
+    if wip_df is None or len(wip_df) == 0:
+        return {}
+    detail_cols = ["Detail Morning", "Detail Afternoon", "Detail OT"]
+    if "Sewing Line Code" not in wip_df.columns or not any(c in wip_df.columns for c in detail_cols):
+        return {}
+
+    restrictions = {}
+    for _, row in wip_df.iterrows():
+        code_raw = row.get("Sewing Line Code")
+        code = str(code_raw).strip() if code_raw is not None else ""
+        if not code or not code.upper().startswith("VS"):
+            continue
+        jobcuts = set()
+        for col in detail_cols:
+            if col in wip_df.columns:
+                jobcuts |= extract_jobcuts_from_detail(row.get(col))
+        restrictions.setdefault(code, set())
+        restrictions[code] |= jobcuts
+
+    return restrictions
+
+
 CUT_PLAN_COLUMNS = [
     "Sewing Line",
     "JobCut - Suffix",
@@ -741,18 +818,28 @@ def rows_to_cutplan_dataframe(rows) -> pd.DataFrame:
     return pd.DataFrame(cleaned, columns=CUT_PLAN_COLUMNS)
 
 
-def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
+def _candidate_table_pool(df: pd.DataFrame, wip_jobcut_restrictions: Optional[dict] = None) -> pd.DataFrame:
     """Shared step for build_cut_plan() and recalc_cut_plan(): drop
-    non-Pending colorway rows, then combine Qty across colorways sharing a
-    Table ID. Returns one row per (Sewing Line, JobCut - Suffix, Mark Type,
-    Table ID).
+    non-Pending colorway rows, drop rows whose JobCut isn't one Tab 2's
+    Detail Morning/Afternoon/OT cells actually mention for that Sewing Line
+    (when that restriction is available - see compute_wip_jobcut_restrictions()),
+    then combine Qty across colorways sharing a Table ID. Returns one row
+    per (Sewing Line, JobCut - Suffix, Mark Type, Table ID).
 
-    Selection is purely status-based: only a colorway row whose Status is
-    exactly "Pending" is eligible for planning - "Completed" AND
-    "In Progress" are both excluded (not just "Completed"). There is no
-    separate date-based eligibility window on top of this (an earlier
-    revision added a Start Cut / FG Start Date window; that's been removed
-    since it was excluding tables that should still be planned).
+    Selection is purely status-based on top of that: only a colorway row
+    whose Status is exactly "Pending" is eligible for planning -
+    "Completed" AND "In Progress" are both excluded (not just "Completed").
+    There is no separate date-based eligibility window on top of this (an
+    earlier revision added a Start Cut / FG Start Date window; that's been
+    removed since it was excluding tables that should still be planned).
+
+    wip_jobcut_restrictions (optional): {Sewing Line code: set of allowed
+    JobCut - Suffix codes}. When a Sewing Line HAS an entry here (even an
+    empty set), only its listed JobCuts are eligible - a line whose Detail
+    cells mentioned nothing that day has nothing planned for it. A Sewing
+    Line with NO entry at all (key absent) is left unrestricted by this
+    function - Tab 2 coverage for planning purposes is decided separately,
+    by compute_wip_session_targets().
 
     Per-session Morning/Afternoon/OT targets are looked up separately per
     Sewing Line (see compute_wip_session_targets()) - this function no
@@ -765,6 +852,13 @@ def _candidate_table_pool(df: pd.DataFrame) -> pd.DataFrame:
 
     status_norm = work["Status"].astype(str).str.strip().str.lower()
     work = work[status_norm == "pending"]
+
+    if wip_jobcut_restrictions:
+        def _jobcut_allowed(row):
+            allowed = wip_jobcut_restrictions.get(row["Sewing Line"])
+            return allowed is None or row["JobCut - Suffix"] in allowed
+
+        work = work[work.apply(_jobcut_allowed, axis=1)]
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     table_cols = group_cols + ["Table ID"]
@@ -997,7 +1091,12 @@ def compute_continuation_flags(rows) -> list:
     return flags
 
 
-def build_cut_plan(df: pd.DataFrame, wip_session_targets: dict, run_datetime: Optional[datetime] = None):
+def build_cut_plan(
+    df: pd.DataFrame,
+    wip_session_targets: dict,
+    run_datetime: Optional[datetime] = None,
+    wip_jobcut_restrictions: Optional[dict] = None,
+):
     """Build the Tab 3 cut plan from Tab 1's extracted DataFrame, using
     Tab 2's per-Sewing-Line Morning/Afternoon/OT targets (see
     compute_wip_session_targets()) to decide how far into the day each
@@ -1008,6 +1107,16 @@ def build_cut_plan(df: pd.DataFrame, wip_session_targets: dict, run_datetime: Op
          per colorway row, so a table with mixed colorway statuses only
          drops its already-completed colorway(s) — the remaining
          (Pending / In Progress) colorway(s) still get planned.
+      1b. Only JobCuts mentioned in Tab 2's own Detail Morning / Detail
+          Afternoon / Detail OT cells (see compute_wip_jobcut_restrictions())
+          are planned for a given Sewing Line, when that restriction is
+          available - a JobCut this line's Detail cells don't mention isn't
+          planned, even if it has otherwise-eligible Pending tables. A line
+          with an empty restriction set (its Detail cells were blank, or
+          mentioned nothing recognizable) has nothing planned for it at
+          all. A line with no restriction entry whatsoever (the WIP file
+          doesn't include Detail columns, or wip_jobcut_restrictions isn't
+          supplied) is left unrestricted by this rule.
       2. Multiple colorways can share the same Table ID within a
          (Sewing Line, JobCut - Suffix, Mark Type) group — their Qty is
          combined into one figure per table before planning.
@@ -1052,7 +1161,7 @@ def build_cut_plan(df: pd.DataFrame, wip_session_targets: dict, run_datetime: Op
 
     Returns (plan_df, run_info).
     """
-    table_level = _candidate_table_pool(df)
+    table_level = _candidate_table_pool(df, wip_jobcut_restrictions=wip_jobcut_restrictions)
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     # Sort candidates by Sewing Line -> JobCut - Suffix -> Mark Type -> Table ID
@@ -1155,6 +1264,12 @@ def build_cut_plan(df: pd.DataFrame, wip_session_targets: dict, run_datetime: Op
         # itself. Purely informational, so Tab 3's UI can flag exactly
         # which lines need Tab 2 coverage before they can be planned.
         "lines_missing_wip_targets": sorted(lines_missing_targets),
+        # Carried through so recalc_cut_plan() can apply the SAME JobCut
+        # restriction when re-selecting tables later (e.g. after the user
+        # raises a target) - run_info is stored server-side only (never
+        # round-tripped through the browser as JSON), so keeping this as a
+        # plain dict of sets here is fine.
+        "wip_jobcut_restrictions": wip_jobcut_restrictions or {},
     }
     return plan_df, run_info
 
@@ -1210,10 +1325,16 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
         exist in the source data for that group) are always kept exactly
         as typed - their own Cut Plan Morning/Afternoon/OT and Diff values
         are never recomputed.
+      - The SAME JobCut restriction build_cut_plan() applied (see
+        compute_wip_jobcut_restrictions()) is re-applied here too, carried
+        forward via run_info["wip_jobcut_restrictions"] - a JobCut a
+        Sewing Line's Detail cells didn't mention still can't be pulled in
+        by raising a target, for consistency with the original plan.
 
     Returns a fresh plan_df (same columns/shape as build_cut_plan's output).
     """
-    table_level = _candidate_table_pool(source_df)
+    wip_jobcut_restrictions = run_info.get("wip_jobcut_restrictions") or {}
+    table_level = _candidate_table_pool(source_df, wip_jobcut_restrictions=wip_jobcut_restrictions)
 
     # Index candidates for fast lookup: (Sewing Line, JobCut - Suffix, Mark Type) -> DataFrame
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]

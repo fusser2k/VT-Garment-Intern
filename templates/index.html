@@ -510,11 +510,8 @@
       const tbody = document.getElementById(tbodyId);
       if (!input || !tbody) return;
       input.addEventListener("input", () => {
-        const needle = input.value.trim().toLowerCase();
-        Array.from(tbody.querySelectorAll("tr")).forEach((tr) => {
-          const matches = needle === "" || tr.textContent.toLowerCase().includes(needle);
-          tr.style.display = matches ? "" : "none";
-        });
+        SEARCH_TERMS[tbodyId] = input.value;
+        applyColumnFilters(tbodyId);
       });
     }
     wireGlobalSearch("extraction-search", "extraction-tbody");
@@ -572,6 +569,15 @@
         return document.querySelector(`tr.filter-row[data-tbody-id="${tbodyId}"]`);
       }
 
+      // Current global-search text per tbody (multi-word, case-insensitive,
+      // AND logic across words - see applyColumnFilters() below, which is
+      // the SINGLE function that actually decides row visibility, combining
+      // this with any active column filters. wireGlobalSearch() only ever
+      // updates this map and re-triggers that shared function - it never
+      // sets row visibility directly, so the two mechanisms can't silently
+      // undo each other by fighting over the same tr.style.display.
+      const SEARCH_TERMS = {}; // { [tbodyId]: string }
+
       function applyColumnFilters(tbodyId) {
         const tbodyEl = document.getElementById(tbodyId);
         if (!tbodyEl) return;
@@ -579,10 +585,26 @@
         const state = COLUMN_FILTER_STATE[tbodyId] || {};
         const activeCols = Object.keys(state).filter((col) => state[col] && state[col].size > 0);
 
+        // Split the search box's text on whitespace into separate words -
+        // ALL of them must appear SOMEWHERE in the row (not necessarily
+        // adjacent, and not as one single phrase), matching how search
+        // boxes normally behave. Searching "VS02 pending" finds any row
+        // containing both "VS02" and "pending" anywhere in its cells, even
+        // though those two words sit in entirely different, non-adjacent
+        // columns - requiring them to appear back-to-back as one literal
+        // substring would almost never match anything.
+        const searchWords = (SEARCH_TERMS[tbodyId] || "").toLowerCase().split(/\s+/).filter(Boolean);
+
         const rows = Array.from(tbodyEl.querySelectorAll("tr"));
         let shownCount = 0;
         rows.forEach((tr) => {
-          const matches = activeCols.every((col) => !state[col].has(strVal(tr, col)));
+          const matchesFilters = activeCols.every((col) => !state[col].has(strVal(tr, col)));
+          let matchesSearch = true;
+          if (matchesFilters && searchWords.length > 0) {
+            const rowText = tr.textContent.toLowerCase();
+            matchesSearch = searchWords.every((word) => rowText.includes(word));
+          }
+          const matches = matchesFilters && matchesSearch;
           tr.style.display = matches ? "" : "none";
           if (matches) shownCount++;
         });
@@ -591,7 +613,8 @@
         const countId = filterRow ? filterRow.dataset.countId : null;
         const filteredCountEl = countId ? document.getElementById(countId) : null;
         if (filteredCountEl) {
-          filteredCountEl.textContent = activeCols.length > 0 ? `(${shownCount} ${T.rows_shown_of_total})` : "";
+          const anyFilterActive = activeCols.length > 0 || searchWords.length > 0;
+          filteredCountEl.textContent = anyFilterActive ? `(${shownCount} ${T.rows_shown_of_total})` : "";
         }
 
         // Reflect active/inactive state on each column's Filter button.
@@ -771,17 +794,48 @@
         document.body.appendChild(dropdown);
         searchInput.focus();
 
-        // Position below the trigger button, using viewport coordinates
+        // Position near the trigger button, using viewport coordinates
         // (position: fixed) so the dropdown is never clipped by the
-        // table's own scroll container.
+        // table's own scroll container. We prefer opening below the
+        // button, but flip above (or shrink the checkbox list) when
+        // there isn't enough room in the viewport - otherwise the
+        // bottom of the dropdown would be cut off by the edge of the
+        // browser window itself, with no way to scroll to it.
         const rect = triggerBtn.getBoundingClientRect();
         const dropdownWidth = dropdown.offsetWidth || 220;
         let left = rect.left;
         if (left + dropdownWidth > window.innerWidth - 8) {
           left = Math.max(8, window.innerWidth - dropdownWidth - 8);
         }
-        dropdown.style.top = `${rect.bottom + 4}px`;
         dropdown.style.left = `${left}px`;
+
+        const viewportMargin = 8;
+        const gap = 4;
+        const dropdownHeight = dropdown.offsetHeight;
+        const spaceBelow = window.innerHeight - rect.bottom - gap - viewportMargin;
+        const spaceAbove = rect.top - gap - viewportMargin;
+
+        if (dropdownHeight <= spaceBelow) {
+          // Fits below as-is.
+          dropdown.style.top = `${rect.bottom + gap}px`;
+        } else if (dropdownHeight <= spaceAbove) {
+          // Doesn't fit below, but fits above.
+          dropdown.style.top = `${rect.top - dropdownHeight - gap}px`;
+        } else {
+          // Doesn't fully fit on either side: open on whichever side has
+          // more room, and shrink the checkbox list so the whole
+          // dropdown (actions + search + list) stays within the
+          // viewport and remains scrollable internally.
+          const nonListHeight = dropdownHeight - list.offsetHeight;
+          if (spaceBelow >= spaceAbove) {
+            dropdown.style.top = `${rect.bottom + gap}px`;
+            list.style.maxHeight = `${Math.max(80, spaceBelow - nonListHeight)}px`;
+          } else {
+            list.style.maxHeight = `${Math.max(80, spaceAbove - nonListHeight)}px`;
+            const newHeight = nonListHeight + list.offsetHeight;
+            dropdown.style.top = `${Math.max(viewportMargin, rect.top - newHeight - gap)}px`;
+          }
+        }
 
         // Close on an outside click, or if the table is scrolled (the
         // dropdown's fixed position would no longer line up with the
