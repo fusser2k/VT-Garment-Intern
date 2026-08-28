@@ -200,6 +200,7 @@ TRANSLATIONS = {
     "js_undo_edit": {"en": "Undo this edit", "th": "เลิกทำการแก้ไขนี้"},
     "js_remove_row": {"en": "Remove row", "th": "ลบแถว"},
     "js_insert_row_below": {"en": "Insert a new row below this one", "th": "แทรกแถวใหม่ใต้แถวนี้"},
+    "js_swap_session": {"en": "Move this table's Qty to a different session", "th": "ย้ายจำนวนของโต๊ะนี้ไปยังกะอื่น"},
     "js_rows_shown_of_total": {"en": "shown (filtered)", "th": "ที่แสดง (กรองแล้ว)"},
     "js_filter_select_all": {"en": "Select All", "th": "เลือกทั้งหมด"},
     "js_filter_clear_all": {"en": "Clear All", "th": "ล้างทั้งหมด"},

@@ -21,6 +21,7 @@ Then open http://127.0.0.1:5001 (see README.md for local-network access).
 import os
 import traceback
 import uuid
+import zipfile
 
 from flask import Flask, render_template, request, send_file, flash, redirect, url_for, session, jsonify
 
@@ -35,6 +36,7 @@ from cutplan2 import (
     build_cut_plan,
     compute_wip_session_targets,
     compute_wip_jobcut_restrictions,
+    compute_fallback_day_target_plan,
     recalc_cut_plan,
     lookup_table_qty,
     write_cut_plan_workbook,
@@ -168,6 +170,10 @@ def _render(active_tab: int):
         current_lang=lang,
         supported_langs=SUPPORTED_LANGS,
         js_t=js_translations(lang),
+        fallback_session_targets={
+            line: list(target)
+            for line, target in ((state["cutplan"] or {}).get("run_info") or {}).get("blank_target_display_lines_targets", {}).items()
+        },
     )
 
 
@@ -346,14 +352,35 @@ def cut_plan():
     if not wip_session or not wip_session.get("structured"):
         flash(translate("run_tab2_first", _get_lang()))
         return redirect(url_for("index", tab=3))
-    wip_session_targets = wip_session.get("session_targets") or {}
-    wip_jobcut_restrictions = wip_session.get("jobcut_restrictions") or {}
+    wip_session_targets = dict(wip_session.get("session_targets") or {})
+    wip_jobcut_restrictions = dict(wip_session.get("jobcut_restrictions") or {})
+
+    # A handful of Sewing Lines (see FALLBACK_TARGET_LINES) have no
+    # Morning/Afternoon/OT breakdown in Tab 2 at all - only Tab 1's own
+    # "Sewing Target Per Day (with OT)" figure. Fill in a single-session
+    # (Morning-only) fallback plan for exactly those lines, WITHOUT
+    # overriding any line Tab 2 already covers for real (dict.setdefault
+    # only inserts when the key is missing).
+    lines_with_real_wip_coverage = set(wip_session_targets.keys())
+    fallback_targets, fallback_restrictions = compute_fallback_day_target_plan(extraction["df"])
+    for line, target in fallback_targets.items():
+        wip_session_targets.setdefault(line, target)
+    for line, allowed in fallback_restrictions.items():
+        wip_jobcut_restrictions.setdefault(line, allowed)
+
+    # Only blank a line's Sewing target Morning/Afternoon/OT display if it
+    # genuinely has no real Tab 2 coverage (the fallback actually had to
+    # fill it in) - a FALLBACK_TARGET_LINES line that DOES have real Tab 2
+    # data should still show its real numbers normally.
+    blank_target_display_lines = set(fallback_targets.keys()) - lines_with_real_wip_coverage
 
     run_datetime = now_th()
 
     try:
         plan_df, run_info = build_cut_plan(
-            extraction["df"], wip_session_targets, run_datetime, wip_jobcut_restrictions=wip_jobcut_restrictions
+            extraction["df"], wip_session_targets, run_datetime,
+            wip_jobcut_restrictions=wip_jobcut_restrictions,
+            blank_target_display_lines=blank_target_display_lines,
         )
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:
@@ -452,9 +479,12 @@ def update_cut_plan(job_id):
     """Regenerate the Cut Plan as SEPARATE workbooks - one per building
     ("Building 1 of <date>.xlsx", "Building 2 of <date>.xlsx", and
     "Unassigned of <date>.xlsx" if that section has any rows) - from the
-    (possibly hand-edited) table posted from Tab 3. Returns JSON describing
-    each file; the browser downloads them individually via
-    /download-cutplan-file/<job_id>/<building_key>."""
+    (possibly hand-edited) table posted from Tab 3, then bundle all of
+    them into ONE zip file so the browser only needs a single click/
+    download to get everything (avoids multi-file auto-download prompts/
+    popup-blocking, and matches "one click, one download"). Returns JSON
+    with the single zip's download URL; the browser fetches it via
+    /download-cutplan-zip/<job_id>."""
     sid = _get_sid()
     cutplan = SESSIONS[sid]["cutplan"]
 
@@ -470,7 +500,7 @@ def update_cut_plan(job_id):
         by_building = split_plan_by_building(edited_plan_df)
 
         building_paths = {}
-        files_info = []
+        building_names = []
         for key in ["Building 1", "Building 2", "Unassigned"]:
             building_df = by_building.get(key)
             if building_df is None or len(building_df) == 0:
@@ -481,27 +511,34 @@ def update_cut_plan(job_id):
                 building_df, cutplan["run_info"], key, edited_at.date(), output_path, edited_at=edited_at
             )
             building_paths[key] = output_path
-            files_info.append({
-                "building": key,
-                "url": url_for("download_cutplan_file", job_id=job_id, building_key=slug),
-                "filename": f"{key} of {edited_at.date().isoformat()}.xlsx",
-            })
+            building_names.append(key)
+
+        zip_path = os.path.join(OUTPUT_DIR, f"CutPlan_{job_id}.zip")
+        with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+            for key, output_path in building_paths.items():
+                zf.write(output_path, arcname=f"{key} of {edited_at.date().isoformat()}.xlsx")
 
         SESSIONS[sid]["cutplan"]["rows"] = edited_plan_df.to_dict(orient="records")
         SESSIONS[sid]["cutplan"]["row_count"] = len(edited_plan_df)
         SESSIONS[sid]["cutplan"]["building_paths"] = building_paths
+        SESSIONS[sid]["cutplan"]["zip_path"] = zip_path
     except Exception as e:
         traceback.print_exc()
         return jsonify({"error": f"Could not save edits: {e}"}), 400
 
-    return jsonify({"files": files_info})
+    return jsonify({
+        "zip_url": url_for("download_cutplan_zip", job_id=job_id),
+        "zip_filename": f"Cut Plan {edited_at.date().isoformat()}.zip",
+        "buildings": building_names,
+    })
 
 
-@app.route("/download-cutplan-file/<job_id>/<building_key>", methods=["GET"])
-def download_cutplan_file(job_id, building_key):
-    """Serve one building's saved Cut Plan file. The download name always
-    reflects TODAY's date (the moment of download), e.g.
-    'Building 1 of 2026-08-18.xlsx' - even if the file was saved earlier."""
+@app.route("/download-cutplan-zip/<job_id>", methods=["GET"])
+def download_cutplan_zip(job_id):
+    """Serve the single zip containing every building's saved Cut Plan
+    file together. The download name always reflects TODAY's date (the
+    moment of download), e.g. 'Cut Plan 2026-08-18.zip' - even if the
+    file was saved earlier."""
     sid = _get_sid()
     cutplan = SESSIONS[sid]["cutplan"]
 
@@ -509,16 +546,13 @@ def download_cutplan_file(job_id, building_key):
         flash("This cut plan is no longer available in this session. Please generate it again.")
         return redirect(url_for("index", tab=3))
 
-    key_by_slug = {k.lower().replace(" ", "-"): k for k in ["Building 1", "Building 2", "Unassigned"]}
-    building_key_full = key_by_slug.get(building_key)
-    output_path = (cutplan.get("building_paths") or {}).get(building_key_full) if building_key_full else None
-
-    if not output_path or not os.path.exists(output_path):
+    zip_path = cutplan.get("zip_path")
+    if not zip_path or not os.path.exists(zip_path):
         flash("That file is no longer available — please save again.")
         return redirect(url_for("index", tab=3))
 
-    download_name = f"{building_key_full} of {now_th().date().isoformat()}.xlsx"
-    return send_file(output_path, as_attachment=True, download_name=download_name)
+    download_name = f"Cut Plan {now_th().date().isoformat()}.zip"
+    return send_file(zip_path, as_attachment=True, download_name=download_name)
 
 
 if __name__ == "__main__":

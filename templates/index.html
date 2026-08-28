@@ -119,6 +119,24 @@
   }
   tr:hover .insert-row-below-btn, .insert-row-below-btn:focus { opacity: 1; }
   .insert-row-below-btn:hover { background: #eef3f9; border-color: #1F4E78; }
+  .swap-session-btn {
+    background: none; border: 1px solid #cfe0f0; border-radius: 3px; color: #1F4E78;
+    cursor: pointer; font-size: 11px; line-height: 1; padding: 2px 5px; margin-right: 4px;
+    opacity: 0; transition: opacity 0.12s ease-in-out; font-weight: bold;
+  }
+  tr:hover .swap-session-btn, .swap-session-btn:focus { opacity: 1; }
+  .swap-session-btn:hover { background: #eef3f9; border-color: #1F4E78; }
+  .swap-session-btn:disabled { cursor: default; opacity: 0 !important; }
+  .swap-session-menu {
+    position: fixed; background: #fff; border: 1px solid #b7c9dc; border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.18); z-index: 500; min-width: 110px; padding: 4px 0;
+  }
+  .swap-session-menu-item {
+    display: block; width: 100%; text-align: left; background: none; border: none;
+    padding: 6px 12px; font-size: 13px; color: #333; cursor: pointer;
+  }
+  .swap-session-menu-item:hover:not(:disabled) { background: #eef3f9; color: #1F4E78; }
+  .swap-session-menu-current { color: #999; font-style: italic; cursor: default; }
   .table-wrap { max-height: 60vh; overflow: auto; border: 1px solid #ddd; border-radius: 6px; }
   .empty { color: #555; padding: 20px; }
   .status-Pending { color: #b36b00; font-weight: bold; }
@@ -384,6 +402,7 @@
           {% endif %}
         {% endfor %}
         <td class="action">
+          <button type="button" class="swap-session-btn" tabindex="-1" title="{{ t('js_swap_session') }}">&#8646;</button>
           <button type="button" class="insert-row-below-btn" tabindex="-1" title="{{ t('js_insert_row_below') }}">&#43;</button>
           <button type="button" class="remove-btn" tabindex="-1" title="{{ t('js_remove_row') }}">&#10005;</button>
         </td>
@@ -480,12 +499,22 @@
 
       {{ render_building_block('b1', t('building1_label'), cutplan.buildings['Building 1']) }}
       {{ render_building_block('b2', t('building2_label'), cutplan.buildings['Building 2']) }}
-      {% if cutplan.buildings['Unassigned'].row_count > 0 %}
+      {# The Unassigned block is ALWAYS rendered (even with 0 rows) so its
+         tbody always exists in the DOM. If it only rendered conditionally
+         on having rows at page-load time, a row added later (e.g. via
+         "+ Add row", before its Sewing Line is typed in, or a row whose
+         Sewing Line doesn't match either building) would compute as
+         "unassigned" during a recalc but have nowhere to be placed - it
+         would just silently vanish, since allTbodies is captured once at
+         page load and JS never creates new tbody elements on the fly.
+         It's hidden via CSS when empty and revealed automatically by JS
+         the moment it actually gets a row (see renderAllBuildings()). #}
+      <div id="unassigned-section" {% if cutplan.buildings['Unassigned'].row_count == 0 %}style="display:none"{% endif %}>
         <div class="note-info">
           {{ t('unassigned_note') }}
         </div>
         {{ render_building_block('unassigned', t('unassigned_label'), cutplan.buildings['Unassigned']) }}
-      {% endif %}
+      </div>
     </div>
     {% endif %}
   </div>
@@ -988,6 +1017,14 @@
       ];
       const BUILDING_1_LINES = {{ building_1_lines | tojson }};
       const BUILDING_2_LINES = {{ building_2_lines | tojson }};
+      // Sewing Line -> [Morning, Afternoon, OT] for lines whose Sewing
+      // target Morning/Afternoon/OT cells are deliberately left blank on
+      // screen (see build_cut_plan()'s blank_target_display_lines) because
+      // they have no real Tab 2 session breakdown - only Tab 1's own
+      // single day target. The swap feature (see moveRowToSession() below)
+      // still needs the REAL number to compute a correct Diff even though
+      // the cell shows nothing.
+      const FALLBACK_SESSION_TARGETS = {{ fallback_session_targets | tojson }};
       // T (JS-driven status text/tooltips, in the current session's
       // language) is now defined in the shared, unguarded block above this
       // IIFE - still accessible here via normal closure/scope chaining.
@@ -1059,6 +1096,13 @@
       function buildRow(rowData, groupCssClass, contFlags) {
         const tr = document.createElement("tr");
         tr.className = groupCssClass || "group-b";
+        // A row is "manual" (always kept, exempt from the automatic
+        // cascade's add/drop logic - see recalc_cut_plan() in
+        // cutplan2/model.py) either because the server told us so
+        // (rowData["_manual"], round-tripped from a PREVIOUS recalc) or
+        // because this is a brand new row just created via "+ Add row"/
+        // the per-row insert button (rowData is null in that case).
+        tr.dataset.manual = rowData ? (rowData["_manual"] ? "1" : "0") : "1";
 
         // Look up this exact table's TRUE original values (from the initial
         // fresh generation), if we have one - a row that existed back then
@@ -1122,6 +1166,13 @@
         });
         const actionTd = document.createElement("td");
         actionTd.className = "action";
+        const swapBtn = document.createElement("button");
+        swapBtn.type = "button";
+        swapBtn.className = "swap-session-btn";
+        swapBtn.tabIndex = -1;
+        swapBtn.title = T.swap_session;
+        swapBtn.innerHTML = "&#8646;";
+        actionTd.appendChild(swapBtn);
         const insertBtn = document.createElement("button");
         insertBtn.type = "button";
         insertBtn.className = "insert-row-below-btn";
@@ -1137,7 +1188,231 @@
         removeBtn.innerHTML = "&#10005;";
         actionTd.appendChild(removeBtn);
         tr.appendChild(actionTd);
+        updateSwapButtonLabel(tr);
         return tr;
+      }
+
+      // Which of the three (Morning/Afternoon/OT) sessions a row's Qty is
+      // CURRENTLY sitting in - used to label the swap button and to decide
+      // which choice(s) the swap MENU offers (every session except the
+      // current one), and to disable the button entirely when there's
+      // nothing to swap yet (a brand new row with no Qty in any session).
+      const SESSION_CYCLE = [
+        { name: "Morning", cutCol: "Cut Plan Morning", diffCol: "Diff (Morning)", targetCol: "Sewing target Morning", label: "M" },
+        { name: "Afternoon", cutCol: "Cut Plan Afternoon", diffCol: "Diff (Afternoon)", targetCol: "Sewing target Afternoon", label: "A" },
+        { name: "OT", cutCol: "Cut Plan OT", diffCol: "Diff (OT)", targetCol: "Sewing target OT", label: "OT" },
+      ];
+
+      // DOM equivalent of rowSession() (defined further below, which reads
+      // from a plain row OBJECT e.g. straight from the server) - this one
+      // reads live values straight off a <tr>'s <input> elements instead,
+      // the same way currentSessionCutPlanCol() does. Returns -1 if no
+      // session currently has a nonzero Cut Plan or Diff value (a brand
+      // new row nothing's been planned into yet).
+      function currentSessionIndex(tr) {
+        for (let i = 0; i < SESSION_CYCLE.length; i++) {
+          const s = SESSION_CYCLE[i];
+          if (numVal(tr, s.cutCol) !== 0 || numVal(tr, s.diffCol) !== 0) return i;
+        }
+        return -1;
+      }
+
+      // The real target for a session, even when its Sewing target cell is
+      // deliberately blank on screen (see FALLBACK_SESSION_TARGETS above) -
+      // reads the displayed value normally, or looks up the true fallback
+      // number by Sewing Line when the cell is blank. sessionIdx is this
+      // session's index into SESSION_CYCLE (0=Morning, 1=Afternoon, 2=OT),
+      // matching the [Morning, Afternoon, OT] order FALLBACK_SESSION_TARGETS
+      // stores its numbers in.
+      function effectiveTargetForSession(tr, s, sessionIdx) {
+        const displayed = strVal(tr, s.targetCol);
+        if (displayed !== "" && displayed !== null && displayed !== undefined) {
+          return numVal(tr, s.targetCol);
+        }
+        const sewingLine = strVal(tr, "Sewing Line");
+        const fallback = FALLBACK_SESSION_TARGETS[sewingLine];
+        return fallback ? Number(fallback[sessionIdx]) || 0 : 0;
+      }
+
+      function updateSwapButtonLabel(tr) {
+        const btn = tr.querySelector(".swap-session-btn");
+        if (!btn) return;
+        const currentIdx = currentSessionIndex(tr);
+        if (currentIdx === -1) {
+          // Nothing planned in any session yet on this row (e.g. a brand
+          // new manually-added row before its Table No./Qty is set) -
+          // there's nothing to move, so disable the button entirely.
+          btn.disabled = true;
+          btn.innerHTML = "&#8646;";
+          btn.title = T.swap_session;
+          return;
+        }
+        btn.disabled = false;
+        btn.innerHTML = `&#8646;${SESSION_CYCLE[currentIdx].label}`;
+        btn.title = T.swap_session;
+      }
+
+      function closeOpenSwapMenu() {
+        document.querySelectorAll(".swap-session-menu").forEach((el) => el.remove());
+        document.removeEventListener("mousedown", handleOutsideSwapMenuClick, true);
+      }
+
+      function handleOutsideSwapMenuClick(e) {
+        if (!e.target.closest(".swap-session-menu") && !e.target.closest(".swap-session-btn")) {
+          closeOpenSwapMenu();
+        }
+      }
+
+      // Open a small menu next to the swap button, offering EVERY session
+      // except the row's current one - the user picks exactly which
+      // session to move the table's Qty to (Morning/Afternoon/OT freely,
+      // not just "the next one in sequence").
+      function openSwapMenu(tr, triggerBtn) {
+        closeOpenSwapMenu();
+        closeOpenFilterDropdown();
+        const currentIdx = currentSessionIndex(tr);
+        if (currentIdx === -1) return;
+
+        const menu = document.createElement("div");
+        menu.className = "swap-session-menu";
+
+        SESSION_CYCLE.forEach((s, idx) => {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "swap-session-menu-item";
+          item.textContent = s.name;
+          if (idx === currentIdx) {
+            item.disabled = true;
+            item.classList.add("swap-session-menu-current");
+          } else {
+            item.addEventListener("click", () => {
+              // A swap is a pure, LOCAL move of this ONE row's own already-
+              // known Qty from one session column to another - it never
+              // touches any other row, so there's no server round-trip
+              // here at all (unlike a Table No./target edit, which DOES
+              // need the server to re-run the group's cascade). Calling
+              // recalcFromServer() here would let the automatic cascade
+              // "fill the gap" this row left behind in its old session by
+              // pulling in an extra table from the same group - exactly
+              // the unwanted new-row side effect swapping must NOT cause.
+              moveRowToSession(tr, idx);
+              closeOpenSwapMenu();
+            });
+          }
+          menu.appendChild(item);
+        });
+
+        document.body.appendChild(menu);
+        const rect = triggerBtn.getBoundingClientRect();
+        const menuWidth = menu.offsetWidth || 100;
+        let left = rect.left;
+        if (left + menuWidth > window.innerWidth - 8) {
+          left = Math.max(8, window.innerWidth - menuWidth - 8);
+        }
+        const menuHeight = menu.offsetHeight;
+        const spaceBelow = window.innerHeight - rect.bottom - 4 - 8;
+        menu.style.top = menuHeight <= spaceBelow
+          ? `${rect.bottom + 4}px`
+          : `${Math.max(8, rect.top - menuHeight - 4)}px`; // flip above if it won't fit below
+        menu.style.left = `${left}px`;
+
+        setTimeout(() => document.addEventListener("mousedown", handleOutsideSwapMenuClick, true), 0);
+      }
+
+      // Move a row's ENTIRE Qty (it always lives in exactly one of the
+      // three Cut Plan columns - see _row_session()/build_cut_plan()) to
+      // the given target session (targetIdx, an index into SESSION_CYCLE).
+      // This is an explicit user override of which session a table gets
+      // cut in, so - just like a manually-added row - it's marked
+      // "_manual" so the next recalculation keeps it exactly where the
+      // user put it instead of silently reassigning it back via the
+      // automatic cascade.
+      //
+      // Diff for the row's NEW session is recalculated as (the REAL
+      // cumulative Qty the target session would have going into this
+      // row's position, per cumulativeQtyForSession() below - i.e. this
+      // row's own moving Qty PLUS every other same-group row already
+      // sitting in that session at or before this Table No.) minus that
+      // session's own target - matching exactly what the full cascade
+      // would show, without re-running it. A naive standalone (Qty -
+      // target) would be WRONG the moment the destination session already
+      // has other tables in it (e.g. swapping a table back into a session
+      // several other tables already occupy) - it would ignore their
+      // contribution entirely. Every session column always carries the
+      // group's REAL target on every row regardless of which session that
+      // row occupies (see the "store the group's full target on every
+      // row" note in compute_continuation_flags()), so reading targetCol
+      // here is always accurate even though it's normally shown on only
+      // the session's first row. The row's other two sessions - including
+      // the one just vacated - go back to 0, matching how every OTHER row
+      // in the table already shows 0 in a session cell that isn't its own
+      // (recomputing what the REST of the group's running Diff should
+      // become in the session this row just LEFT would need the full
+      // cascade, which swapping deliberately doesn't touch).
+
+      // Parse a row's Table No. as a number, or null if it isn't one (a
+      // manually-added row with a non-numeric placeholder, or simply
+      // blank). Used to compare Table Nos. for cumulative-Diff purposes.
+      function parseTableNo(tr) {
+        const v = parseFloat(strVal(tr, "Table No."));
+        return isNaN(v) ? null : v;
+      }
+
+      // The REAL cumulative Qty a session would have going INTO this row's
+      // position, if the full server-side cascade were re-run - without
+      // actually re-running it (and risking the cascade pulling in/
+      // dropping OTHER rows, which swapping must never do). Sums this
+      // row's own (about to move) Qty together with every OTHER row in
+      // the SAME group (same Sewing Line/JobCut - Suffix/Mark Type,
+      // scoped to the same building's table since groups never span
+      // buildings) that is CURRENTLY sitting in the target session AND
+      // has a Table No. at or before this row's own - mirroring exactly
+      // how the real cascade processes a group's tables smallest-Table-ID-
+      // first. This only READS sibling rows; none of their own values are
+      // touched, so it can never itself cause another row to appear,
+      // disappear, or change.
+      function cumulativeQtyForSession(tr, targetIdx, movingQty) {
+        const sessionCol = SESSION_CYCLE[targetIdx].cutCol;
+        const groupKeyOfRow = (t) => `${strVal(t, "Sewing Line")}|${strVal(t, "JobCut - Suffix")}|${strVal(t, "Mark Type")}`;
+        const myKey = groupKeyOfRow(tr);
+        const myTableNo = parseTableNo(tr);
+        let sum = movingQty;
+        const tbody = tr.closest("tbody");
+        if (tbody && myTableNo !== null) {
+          Array.from(tbody.querySelectorAll("tr")).forEach((other) => {
+            if (other === tr) return;
+            if (groupKeyOfRow(other) !== myKey) return;
+            const otherTableNo = parseTableNo(other);
+            if (otherTableNo === null || otherTableNo > myTableNo) return; // only earlier-or-equal tables count
+            sum += numVal(other, sessionCol);
+          });
+        }
+        return sum;
+      }
+
+      function moveRowToSession(tr, targetIdx) {
+        const currentIdx = currentSessionIndex(tr);
+        if (currentIdx === -1 || currentIdx === targetIdx) return;
+        const qty = numVal(tr, SESSION_CYCLE[currentIdx].cutCol);
+
+        SESSION_CYCLE.forEach((s, idx) => {
+          const cutInput = cellInput(tr, s.cutCol);
+          const diffInput = cellInput(tr, s.diffCol);
+          if (idx === targetIdx) {
+            const target = effectiveTargetForSession(tr, s, idx);
+            const cumulative = cumulativeQtyForSession(tr, targetIdx, qty);
+            if (cutInput) cutInput.value = qty;
+            if (diffInput) diffInput.value = String(cumulative - target);
+          } else {
+            if (cutInput) cutInput.value = "0";
+            if (diffInput) diffInput.value = "0";
+          }
+          if (cutInput) updateOriginalIndicator(cutInput);
+          if (diffInput) updateOriginalIndicator(diffInput);
+        });
+
+        tr.dataset.manual = "1";
+        updateSwapButtonLabel(tr);
       }
 
       // Which of the three (Morning/Afternoon/OT) sessions a Cut Plan row
@@ -1160,12 +1435,18 @@
       // OWN session within a Mark Type - every other row hides them,
       // whether that other row is a LATER table in the same session (a
       // true repeat) or a table in a DIFFERENT session entirely (which
-      // never had that target apply to it). EXCEPTION: a Mark Type group
-      // with only ONE row total (e.g. the oversized-table rule, or simply
-      // a group with only one Pending table) shows ALL THREE targets on
-      // that one row for context - there's no "next row" to show the
-      // others on. Mirrors the Python-side compute_continuation_flags()
-      // in cutplan2/model.py exactly.
+      // never had that target apply to it). A session can be SKIPPED
+      // ENTIRELY (e.g. two tables together already cover Morning AND
+      // Afternoon capacity, so the next table jumps straight to OT) -
+      // when that happens the skipped session's target is shown
+      // alongside the target of whichever row is first to reach a LATER
+      // session, and/or on the group's very last row if the group ends
+      // before ever reaching a later session at all (this also covers a
+      // single-row group: Morning alone can cover the whole day, so
+      // Afternoon/OT are shown on that same row for context). Mirrors
+      // the Python-side compute_continuation_flags() in cutplan2/model.py
+      // exactly.
+      const SESSION_ORDER = ["Morning", "Afternoon", "OT"];
       const SESSION_TARGET_COLS = { Morning: "Sewing target Morning", Afternoon: "Sewing target Afternoon", OT: "Sewing target OT" };
 
       function groupKeyOf(row) {
@@ -1173,51 +1454,61 @@
       }
 
       function computeContinuationFlags(rows) {
-        const groupSizes = new Map();
-        rows.forEach((row) => {
-          const key = groupKeyOf(row);
-          groupSizes.set(key, (groupSizes.get(key) || 0) + 1);
-        });
-
-        const flags = [];
+        const flags = new Array(rows.length);
         let prev = null;
-        let seenSessionsThisGroup = new Set();
-        rows.forEach((row) => {
-          const rowFlags = {};
-          let sameJobcut = false;
-          let sameMarkType = false;
-          if (prev) {
-            const sameSewingLine = String(row["Sewing Line"] ?? "") === String(prev["Sewing Line"] ?? "");
-            sameJobcut = sameSewingLine && String(row["JobCut - Suffix"] ?? "") === String(prev["JobCut - Suffix"] ?? "");
-            sameMarkType = sameJobcut && String(row["Mark Type"] ?? "") === String(prev["Mark Type"] ?? "");
-          }
-          // Sewing Line and JobCut - Suffix show/hide together, so Sewing
-          // Line re-displays at the start of every JobCut, not just once
-          // for the whole Sewing Line block.
-          rowFlags["Sewing Line"] = sameJobcut;
-          rowFlags["JobCut - Suffix"] = sameJobcut;
-          rowFlags["Mark Type"] = sameMarkType;
-          rowFlags["Sewing Target Per Day"] = sameMarkType;
+        let i = 0;
+        while (i < rows.length) {
+          let j = i;
+          while (j < rows.length && groupKeyOf(rows[j]) === groupKeyOf(rows[i])) j += 1;
 
-          if (!sameMarkType) seenSessionsThisGroup = new Set(); // a new Mark Type group starts fresh
+          let lastShownIdx = -1; // how far into SESSION_ORDER we've shown a target so far
+          for (let idx = i; idx < j; idx++) {
+            const row = rows[idx];
+            const rowFlags = {};
+            let sameJobcut = false;
+            let sameMarkType = false;
+            if (prev) {
+              const sameSewingLine = String(row["Sewing Line"] ?? "") === String(prev["Sewing Line"] ?? "");
+              sameJobcut = sameSewingLine && String(row["JobCut - Suffix"] ?? "") === String(prev["JobCut - Suffix"] ?? "");
+              sameMarkType = sameJobcut && String(row["Mark Type"] ?? "") === String(prev["Mark Type"] ?? "");
+            }
+            // Sewing Line and JobCut - Suffix show/hide together, so Sewing
+            // Line re-displays at the start of every JobCut, not just once
+            // for the whole Sewing Line block.
+            rowFlags["Sewing Line"] = sameJobcut;
+            rowFlags["JobCut - Suffix"] = sameJobcut;
+            rowFlags["Mark Type"] = sameMarkType;
+            rowFlags["Sewing Target Per Day"] = sameMarkType;
 
-          if (groupSizes.get(groupKeyOf(row)) === 1) {
-            Object.values(SESSION_TARGET_COLS).forEach((col) => { rowFlags[col] = false; });
-          } else {
+            Object.values(SESSION_TARGET_COLS).forEach((col) => { rowFlags[col] = true; }); // hidden by default
+
             const thisSession = rowSession(row);
-            Object.entries(SESSION_TARGET_COLS).forEach(([sessionName, col]) => {
-              if (thisSession === sessionName && !seenSessionsThisGroup.has(sessionName)) {
-                rowFlags[col] = false; // this row's own session, first appearance - show it
-                seenSessionsThisGroup.add(sessionName);
-              } else {
-                rowFlags[col] = true; // wrong session for this row, or already shown once - hide it
+            const thisIdx = SESSION_ORDER.indexOf(thisSession);
+            if (thisIdx !== -1 && thisIdx > lastShownIdx) {
+              // First row to reach a session we haven't shown yet - show
+              // its own target, plus any sessions skipped over to get here.
+              for (let skipIdx = lastShownIdx + 1; skipIdx <= thisIdx; skipIdx++) {
+                rowFlags[SESSION_TARGET_COLS[SESSION_ORDER[skipIdx]]] = false;
               }
-            });
+              lastShownIdx = thisIdx;
+            }
+
+            flags[idx] = rowFlags;
+            prev = row;
           }
 
-          flags.push(rowFlags);
-          prev = row;
-        });
+          // The group ended before ever reaching one or more of the later
+          // sessions (e.g. everything fit in Morning alone) - show those
+          // remaining targets on the group's last row so they aren't lost.
+          if (lastShownIdx < SESSION_ORDER.length - 1) {
+            const lastIdx = j - 1;
+            for (let skipIdx = lastShownIdx + 1; skipIdx < SESSION_ORDER.length; skipIdx++) {
+              flags[lastIdx][SESSION_TARGET_COLS[SESSION_ORDER[skipIdx]]] = false;
+            }
+          }
+
+          i = j;
+        }
         return flags;
       }
 
@@ -1264,6 +1555,14 @@
         const rows = Array.from(tbodyEl.querySelectorAll("tr")).map((tr) => {
           const row = {};
           COLUMNS.forEach((col) => { row[col] = strVal(tr, col); });
+          // Carry the "manual" flag through the resort - this rebuilds every
+          // row in the tbody via renderRowsIntoTbody() below, and without
+          // this, a manually-added row (see the insert-row-below handler)
+          // would silently lose its "always keep me" marking right before
+          // the recalc that always follows a Table No. edit, making the
+          // very next recalculation treat it as an ordinary auto-planned
+          // row - and drop it if the group's already at capacity.
+          row["_manual"] = tr.dataset.manual === "1";
           return row;
         });
 
@@ -1309,6 +1608,15 @@
           const key = tb.dataset.building;
           renderRowsIntoTbody(tb, byBuilding[key] || []);
         });
+        // The Unassigned block starts hidden if it had no rows at page
+        // load - reveal it the moment a row actually lands there (e.g. a
+        // brand-new row whose Sewing Line hasn't been typed in yet, or
+        // doesn't match either building), and hide it again if it empties
+        // back out.
+        const unassignedSection = document.getElementById("unassigned-section");
+        if (unassignedSection) {
+          unassignedSection.style.display = byBuilding.unassigned.length > 0 ? "" : "none";
+        }
       }
 
       // Show/hide the "Original: X" indicator (+ a revert button) under a
@@ -1412,6 +1720,7 @@
           Array.from(tb.querySelectorAll("tr")).forEach((tr) => {
             const row = {};
             COLUMNS.forEach((col) => { row[col] = strVal(tr, col); });
+            row["_manual"] = tr.dataset.manual === "1";
             rows.push(row);
           });
         });
@@ -1522,7 +1831,7 @@
         // the revert/remove action below. preventDefault() on mousedown stops
         // the focus change before it happens.
         tb.addEventListener("mousedown", (e) => {
-          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".insert-row-below-btn")) {
+          if (e.target.closest(".remove-btn") || e.target.closest(".revert-btn") || e.target.closest(".decoration-flag-dismiss") || e.target.closest(".insert-row-below-btn") || e.target.closest(".swap-session-btn")) {
             e.preventDefault();
           }
         });
@@ -1537,11 +1846,51 @@
             updateRowCount(tb);
             return;
           }
-          if (e.target.closest(".insert-row-below-btn")) {
+          if (e.target.closest(".swap-session-btn")) {
+            const btn = e.target.closest(".swap-session-btn");
+            if (btn.disabled) return;
             const currentRow = e.target.closest("tr");
-            const newRow = buildRow(null, "group-b");
+            openSwapMenu(currentRow, btn);
+            return;
+          }
+          if (e.target.closest(".insert-row-below-btn")) {
+            // Inherit this group's identity (Sewing Line / JobCut - Suffix /
+            // Mark Type / session targets / day target) from the row the "+"
+            // was clicked on, rather than starting completely blank. The
+            // button sits INSIDE a specific group's block, so the user's
+            // natural expectation is "add another table to THIS group" -
+            // typing just a Table No. Starting blank meant that Table No.
+            // lookup could never succeed (no Sewing Line/JobCut/Mark Type to
+            // match against), so the row's identity stayed empty, it fell
+            // into neither building's group on the next recalculation, and
+            // it appeared to vanish. strVal() reads the real underlying
+            // value even from a visually-hidden continuation cell, so this
+            // correctly inherits the group's identity even when the
+            // clicked-on row isn't itself showing it.
+            const currentRow = e.target.closest("tr");
+            const inherited = {
+              "Sewing Line": strVal(currentRow, "Sewing Line"),
+              "JobCut - Suffix": strVal(currentRow, "JobCut - Suffix"),
+              "Sewing Target Per Day": strVal(currentRow, "Sewing Target Per Day"),
+              "Mark Type": strVal(currentRow, "Mark Type"),
+              "Table No.": "",
+              "Sewing target Morning": strVal(currentRow, "Sewing target Morning"),
+              "Cut Plan Morning": "0",
+              "Diff (Morning)": "0",
+              "Sewing target Afternoon": strVal(currentRow, "Sewing target Afternoon"),
+              "Cut Plan Afternoon": "0",
+              "Diff (Afternoon)": "0",
+              "Sewing target OT": strVal(currentRow, "Sewing target OT"),
+              "Cut Plan OT": "0",
+              "Diff (OT)": "0",
+              "Note": "",
+              "_manual": true,
+            };
+            const newRow = buildRow(inherited, "group-b");
             currentRow.after(newRow);
             updateRowCount(tb);
+            const tableNoInput = cellInput(newRow, "Table No.");
+            if (tableNoInput) tableNoInput.focus();
             return;
           }
           if (e.target.closest(".revert-btn")) {
@@ -1577,8 +1926,9 @@
       });
 
       // Save is a single, page-level action: gather rows from BOTH
-      // buildings' tables together and save them as one workbook (with
-      // separate sheets per building, handled server-side).
+      // buildings' tables together and save them as one zip download (one
+      // click, one file - the zip itself contains a separate workbook per
+      // building, built server-side).
       const saveBtn = document.getElementById("cutplan-save-btn");
       if (saveBtn) {
         saveBtn.addEventListener("click", async () => {
@@ -1598,26 +1948,19 @@
               throw new Error(errBody.error || `Server returned ${resp.status}`);
             }
             const data = await resp.json();
-            const files = data.files || [];
 
-            // Each building is its own downloadable file. Trigger them one
-            // at a time with a small stagger - some browsers block several
-            // simultaneous auto-downloads from the same click if fired all
-            // at once.
-            files.forEach((f, i) => {
-              setTimeout(() => {
-                const a = document.createElement("a");
-                a.href = f.url;
-                a.download = f.filename;
-                document.body.appendChild(a);
-                a.click();
-                a.remove();
-              }, i * 400);
-            });
+            if (data.zip_url) {
+              const a = document.createElement("a");
+              a.href = data.zip_url;
+              a.download = data.zip_filename || "Cut Plan.zip";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            }
 
-            const names = files.map((f) => f.filename).join(", ");
-            statusEl.textContent = files.length
-              ? `${T.saved_downloading} ${names}`
+            const names = (data.buildings || []).join(", ");
+            statusEl.textContent = (data.buildings || []).length
+              ? `${T.saved_downloading} ${data.zip_filename} (${names})`
               : T.saved_nothing;
           } catch (err) {
             statusEl.textContent = `${T.error_prefix} ${err.message}`;
@@ -1637,6 +1980,15 @@
       // Capture the true baseline exactly once, from the freshly-generated
       // rows already sitting in the DOM at this point.
       captureInitialBaseline();
+
+      // Set every initial (server-rendered) row's swap-session button label
+      // to match its actual current session - buildRow() does this
+      // automatically for any row created/rebuilt client-side afterward,
+      // but the very first page load's rows come straight from the Jinja
+      // template, not buildRow(), so they need this one-time pass too.
+      allTbodies.forEach((tb) => {
+        Array.from(tb.querySelectorAll("tr")).forEach((tr) => updateSwapButtonLabel(tr));
+      });
     })();
 
     // Live clock, driven by the visitor's own device clock (updates every second).
