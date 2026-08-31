@@ -89,12 +89,14 @@ TRANSLATIONS = {
     "tab3_desc": {
         "en": "Plans which cutting tables to work on first, per Sewing Line / JobCut - Suffix / Mark "
               "Type. Completed tables are skipped. Colorways sharing the same Table ID are combined "
-              "into one quantity. Tables are planned smallest Table ID first, adding tables until the "
-              "running quantity reaches that Mark Type's daily sewing target. Output is split into two "
-              "tables by building, based on Sewing Line.",
+              "into one quantity. Tables are planned smallest Table ID first, adding tables to Morning, "
+              "then Afternoon, then OT in turn until the running quantity reaches that Sewing Line's "
+              "target for the session currently being filled. Output is split into two tables by "
+              "building, based on Sewing Line.",
         "th": "วางแผนว่าจะตัดโต๊ะไหนก่อน ตามกลุ่ม Sewing Line / JobCut - Suffix / Mark Type "
               "โต๊ะที่เสร็จแล้วจะถูกข้าม สีเดียวกันที่อยู่ในหมายเลขโต๊ะเดียวกันจะถูกรวมเป็นจำนวนเดียว "
-              "จะวางแผนโต๊ะที่มีหมายเลขน้อยที่สุดก่อน แล้วเพิ่มโต๊ะไปเรื่อยๆ จนกว่าจำนวนสะสมจะถึงเป้าหมายการเย็บต่อวันของ Mark Type นั้น "
+              "จะวางแผนโต๊ะที่มีหมายเลขน้อยที่สุดก่อน แล้วเพิ่มโต๊ะเข้าไปในกะเช้า ตามด้วยกะบ่าย แล้วจึง OT ตามลำดับ "
+              "จนกว่าจำนวนสะสมจะถึงเป้าหมายของ Sewing Line นั้นสำหรับกะที่กำลังวางแผนอยู่ "
               "ผลลัพธ์จะถูกแบ่งเป็นสองตารางตามอาคาร โดยอิงจาก Sewing Line",
     },
     "generate_cut_plan_btn": {"en": "Generate cut plan", "th": "สร้างแผนการตัด"},
@@ -123,13 +125,14 @@ TRANSLATIONS = {
               "needed for that group — more tables get pulled in if a target now needs them, and tables "
               "beyond what's needed get dropped. Use + Add row to plan an extra table by hand, or the "
               "\u2715 next to a row to drop it. Note starts blank. Nothing is saved until you click Save "
-              "changes & Download Excel — that saves both buildings' tables together into one workbook.",
+              "changes or Download Excel — either one saves both buildings' tables together into one "
+              "workbook; Download Excel also downloads it right away.",
         "th": "ทุกช่องด้านล่างสามารถแก้ไขได้ รวมถึงจำนวน Cut Plan และ Diff ของแต่ละช่วงเวลา การแก้ไข Table No. "
               "จะดึงจำนวนจริงของโต๊ะนั้นจากข้อมูลแท็บ 1 การแก้ไขจำนวน Cut Plan หรือเป้าหมายของช่วงเวลาใด "
               "(เช้า/บ่าย/OT) จะตรวจสอบใหม่ว่ากลุ่มนั้นต้องใช้โต๊ะไหนบ้าง — จะดึงโต๊ะเพิ่มเข้ามาถ้าจำเป็นต่อเป้าหมาย "
               "และจะตัดโต๊ะที่เกินความจำเป็นออก ใช้ปุ่ม + Add row เพื่อเพิ่มโต๊ะเอง หรือกด \u2715 ข้างแถวเพื่อลบ Note "
-              "จะเริ่มต้นเป็นค่าว่าง จะยังไม่มีการบันทึกจนกว่าจะกด Save changes & Download Excel "
-              "ซึ่งจะบันทึกตารางของทั้งสองอาคารรวมกันเป็นไฟล์เดียว",
+              "จะเริ่มต้นเป็นค่าว่าง จะยังไม่มีการบันทึกจนกว่าจะกด Save changes หรือ Download Excel — ทั้งสองปุ่มจะบันทึกตาราง "
+              "ของทั้งสองอาคารรวมกันเป็นไฟล์เดียว ส่วน Download Excel จะดาวน์โหลดไฟล์ให้ทันทีด้วย",
     },
     "generated_label": {"en": "Generated", "th": "สร้างเมื่อ"},
     "table_rows_planned_total": {"en": "table row(s) planned total", "th": "แถวโต๊ะที่วางแผนทั้งหมด"},
@@ -139,7 +142,8 @@ TRANSLATIONS = {
         "th": "Sewing Line ที่ถูกข้ามในการวางแผนครั้งนี้ - ไม่พบ Sewing Line นี้ในข้อมูล WIP ของแท็บ 2 "
               "จึงไม่ทราบเป้าหมายช่วงเช้า/บ่าย/OT และไม่ได้วางแผนให้:",
     },
-    "save_changes_btn": {"en": "Save changes & Download Excel", "th": "บันทึกการเปลี่ยนแปลง & ดาวน์โหลด Excel"},
+    "save_changes_btn": {"en": "Save changes", "th": "บันทึกการเปลี่ยนแปลง"},
+    "download_excel_btn": {"en": "Download Excel", "th": "ดาวน์โหลด Excel"},
     "table_rows_planned": {"en": "table row(s) planned", "th": "แถวโต๊ะที่วางแผน"},
     "add_row_btn": {"en": "+ Add row", "th": "+ เพิ่มแถว"},
     "filter_placeholder": {"en": "Filter\u2026", "th": "กรอง\u2026"},
@@ -197,6 +201,14 @@ TRANSLATIONS = {
         "en": "Saved (nothing to download - both buildings are empty).",
         "th": "บันทึกแล้ว (ไม่มีไฟล์ให้ดาวน์โหลด — ทั้งสองอาคารไม่มีข้อมูล)",
     },
+    "js_saved_only": {"en": "Changes saved.", "th": "บันทึกการเปลี่ยนแปลงแล้ว"},
+    "js_downloading": {"en": "Downloading\u2026", "th": "กำลังดาวน์โหลด\u2026"},
+    "js_session_expired": {
+        "en": "This cut plan is no longer available - likely because the app was updated or restarted since it was generated. Your edits on this page aren't lost, but they can't be saved to this old plan anymore.",
+        "th": "ไม่พบแผนการตัดนี้แล้ว — อาจเป็นเพราะแอปได้รับการอัปเดตหรือรีสตาร์ทไปแล้วหลังจากสร้างแผนนี้ การแก้ไขของคุณในหน้านี้ยังไม่หายไป แต่ไม่สามารถบันทึกเข้าแผนเก่านี้ได้อีกต่อไป",
+    },
+    "js_regenerate_prompt": {"en": "Please regenerate the cut plan and redo your edits.", "th": "กรุณาสร้างแผนการตัดใหม่แล้วทำการแก้ไขอีกครั้ง"},
+    "js_regenerate_link": {"en": "Regenerate now", "th": "สร้างแผนใหม่ตอนนี้"},
     "js_undo_edit": {"en": "Undo this edit", "th": "เลิกทำการแก้ไขนี้"},
     "js_remove_row": {"en": "Remove row", "th": "ลบแถว"},
     "js_insert_row_below": {"en": "Insert a new row below this one", "th": "แทรกแถวใหม่ใต้แถวนี้"},

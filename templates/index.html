@@ -485,7 +485,8 @@
           &middot; <span id="cutplan-row-count-total">{{ cutplan.row_count }}</span> {{ t('table_rows_planned_total') }}
         </div>
         <div class="toolbar">
-          <button type="button" class="btn btn-primary" id="cutplan-save-btn">{{ t('save_changes_btn') }}</button>
+          <button type="button" class="btn btn-secondary" id="cutplan-save-btn">{{ t('save_changes_btn') }}</button>
+          <button type="button" class="btn btn-primary" id="cutplan-download-btn">{{ t('download_excel_btn') }}</button>
           <span class="status" id="cutplan-status-msg"></span>
         </div>
       </div>
@@ -1017,13 +1018,14 @@
       ];
       const BUILDING_1_LINES = {{ building_1_lines | tojson }};
       const BUILDING_2_LINES = {{ building_2_lines | tojson }};
-      // Sewing Line -> [Morning, Afternoon, OT] for lines whose Sewing
-      // target Morning/Afternoon/OT cells are deliberately left blank on
-      // screen (see build_cut_plan()'s blank_target_display_lines) because
-      // they have no real Tab 2 session breakdown - only Tab 1's own
-      // single day target. The swap feature (see moveRowToSession() below)
-      // still needs the REAL number to compute a correct Diff even though
-      // the cell shows nothing.
+      // Sewing Line -> [Morning, Afternoon, OT] real numbers for lines with
+      // no genuine Tab 2 session breakdown (see FALLBACK_TARGET_LINES /
+      // compute_fallback_day_target_plan() in cutplan2/model.py) - these
+      // lines' Sewing target cells already show these same real numbers
+      // normally, so this is purely a defensive backstop for the swap
+      // feature's Diff calculation (see effectiveTargetForSession() below)
+      // in the rare case a row's target cell is genuinely blank (e.g. a
+      // brand new manually-added row with no sibling row yet to supply it).
       const FALLBACK_SESSION_TARGETS = {{ fallback_session_targets | tojson }};
       // T (JS-driven status text/tooltips, in the current session's
       // language) is now defined in the shared, unguarded block above this
@@ -1319,6 +1321,151 @@
         setTimeout(() => document.addEventListener("mousedown", handleOutsideSwapMenuClick, true), 0);
       }
 
+      // Parse a row's Table No. as a number, or null if it isn't one (a
+      // manually-added row with a non-numeric placeholder, or simply
+      // blank). Used to order tables for the Diff-chain recalculation.
+      function parseTableNo(tr) {
+        const v = parseFloat(strVal(tr, "Table No."));
+        return isNaN(v) ? null : v;
+      }
+
+      // Every row in a group carries the group's full (Morning, Afternoon,
+      // OT) target regardless of which session it's actually in, so any
+      // row from the group can be used to read them. Returns the running
+      // sum through each session - [target upto Morning, upto Morning+
+      // Afternoon, upto all three] - mirroring cumulative_target_upto in
+      // build_cut_plan()/recalc_cut_plan().
+      function cumulativeTargetUptoForGroup(tr) {
+        let sum = 0;
+        return SESSION_CYCLE.map((s, idx) => {
+          sum += effectiveTargetForSession(tr, s, idx);
+          return sum;
+        });
+      }
+
+      function groupKeyOfRow(t) {
+        return `${strVal(t, "Sewing Line")}|${strVal(t, "JobCut - Suffix")}|${strVal(t, "Mark Type")}`;
+      }
+
+      // Every OTHER row in the same group (same building's tbody), sorted
+      // by Table No. ascending - the same order the real cascade always
+      // processes a group's tables in. Rows with a non-numeric Table No.
+      // sort last, same as resortTbodyRows().
+      function groupRowsSortedByTableNo(tr) {
+        const tbody = tr.closest("tbody");
+        if (!tbody) return [tr];
+        const myKey = groupKeyOfRow(tr);
+        const rows = Array.from(tbody.querySelectorAll("tr")).filter((t) => groupKeyOfRow(t) === myKey);
+        rows.sort((a, b) => {
+          const an = parseTableNo(a), bn = parseTableNo(b);
+          if (an === null && bn === null) return 0;
+          if (an === null) return 1;
+          if (bn === null) return -1;
+          return an - bn;
+        });
+        return rows;
+      }
+
+      // Recompute Diff for `tr` (which has JUST had its session changed by
+      // moveRowToSession() below, so its own Cut Plan columns already
+      // reflect the move) AND for every later table (by Table No.) in the
+      // same group - a session move shifts the running cumulative total
+      // from that point on, so every later table's Diff needs to shift
+      // with it, exactly as the real cascade would produce, without
+      // re-running the cascade itself (so no row is ever added, dropped,
+      // or reassigned to a different session by this - only existing
+      // rows' own Diff numbers get corrected).
+      //
+      // For a table in session S whose immediately preceding table (by
+      // Table No., in ANY session) is in session P with Diff d: this
+      // table's Diff = d + thisTableQty - (cumulativeTargetUpto[S] -
+      // cumulativeTargetUpto[P]) - i.e. carry the preceding table's
+      // running total forward, add this table's own Qty, and subtract
+      // only the ADDITIONAL target(s) crossed between P and S (which is
+      // just S's own target when S is the very next session after P, but
+      // correctly accounts for a skipped session in between too). The
+      // very first table in the group (nothing precedes it) starts from
+      // Diff 0 with "no session yet" (P = -1, cumulativeTargetUpto[-1] =
+      // 0) - i.e. its Diff is simply its own Qty minus the FULL
+      // cumulative target through its own session.
+      function recalcDiffChainFrom(tr) {
+        const groupRows = groupRowsSortedByTableNo(tr);
+        const cumulativeTargetUpto = cumulativeTargetUptoForGroup(tr);
+        const targetUpto = (sessionIdx) => (sessionIdx === -1 ? 0 : cumulativeTargetUpto[sessionIdx]);
+
+        const startPos = groupRows.indexOf(tr);
+        // Seed from whatever precedes this row - untouched, so it reflects
+        // whatever was already correctly displayed there.
+        let seedSessionIdx = -1;
+        let seedDiff = 0;
+        if (startPos > 0) {
+          const prevRow = groupRows[startPos - 1];
+          const prevIdx = currentSessionIndex(prevRow);
+          if (prevIdx !== -1) {
+            seedSessionIdx = prevIdx;
+            seedDiff = numVal(prevRow, SESSION_CYCLE[prevIdx].diffCol);
+          }
+        }
+
+        for (let pos = startPos === -1 ? 0 : startPos; pos < groupRows.length; pos++) {
+          const row = groupRows[pos];
+          const sessionIdx = currentSessionIndex(row);
+          if (sessionIdx === -1) continue; // nothing planned on this row - nothing to chain through
+          const qty = numVal(row, SESSION_CYCLE[sessionIdx].cutCol);
+          const newDiff = seedDiff + qty - (targetUpto(sessionIdx) - targetUpto(seedSessionIdx));
+          const diffInput = cellInput(row, SESSION_CYCLE[sessionIdx].diffCol);
+          if (diffInput) {
+            diffInput.value = String(newDiff);
+            updateOriginalIndicator(diffInput);
+          }
+          seedDiff = newDiff;
+          seedSessionIdx = sessionIdx;
+        }
+      }
+
+      // Recompute Diff for EVERY row in the group, from its very first
+      // table onward - used after a Sewing target Morning/Afternoon/OT
+      // cell is edited directly (not via swap), since a target change can
+      // ripple through every row's Diff, not just whichever one's session
+      // that target happens to belong to. This matters most for lines
+      // with no genuine Tab 2 session breakdown (see FALLBACK_TARGET_LINES
+      // in cutplan2/model.py) - recalc_cut_plan() treats every one of
+      // their rows as permanently manual, so the server only ever echoes
+      // back whatever Diff is already there rather than recomputing it;
+      // without this, editing their target would silently leave every
+      // Diff stale. Simply calls recalcDiffChainFrom() on the group's
+      // first row, which walks the same chain formula through the rest.
+      function recalcDiffChainForGroup(tr) {
+        const groupRows = groupRowsSortedByTableNo(tr);
+        if (groupRows.length > 0) recalcDiffChainFrom(groupRows[0]);
+      }
+
+      // After a swap, which row within the group shows each session's
+      // target can change - e.g. moving an earlier table INTO OT means
+      // that table, not whichever row used to be OT's first table, should
+      // now be the one displaying the OT target (see
+      // compute_continuation_flags() in cutplan2/model.py - the same rule
+      // applies here). This only toggles which cells show the (always
+      // real, always-present) target value already sitting in every row -
+      // it never changes the value itself, and never touches any other
+      // column, so it can't affect anything else about these rows.
+      function refreshTargetVisibilityForGroup(tr) {
+        const groupRows = groupRowsSortedByTableNo(tr);
+        const plainRows = groupRows.map((t) => {
+          const obj = {};
+          COLUMNS.forEach((col) => { obj[col] = strVal(t, col); });
+          return obj;
+        });
+        const flags = computeContinuationFlags(plainRows);
+        groupRows.forEach((t, idx) => {
+          Object.values(SESSION_TARGET_COLS).forEach((col) => {
+            const td = t.querySelector(`td[data-col="${col}"]`);
+            if (!td) return;
+            td.classList.toggle("continuation-cell", !!flags[idx][col]);
+          });
+        });
+      }
+
       // Move a row's ENTIRE Qty (it always lives in exactly one of the
       // three Cut Plan columns - see _row_session()/build_cut_plan()) to
       // the given target session (targetIdx, an index into SESSION_CYCLE).
@@ -1328,68 +1475,12 @@
       // user put it instead of silently reassigning it back via the
       // automatic cascade.
       //
-      // Diff for the row's NEW session is recalculated as (the REAL
-      // cumulative Qty the target session would have going into this
-      // row's position, per cumulativeQtyForSession() below - i.e. this
-      // row's own moving Qty PLUS every other same-group row already
-      // sitting in that session at or before this Table No.) minus that
-      // session's own target - matching exactly what the full cascade
-      // would show, without re-running it. A naive standalone (Qty -
-      // target) would be WRONG the moment the destination session already
-      // has other tables in it (e.g. swapping a table back into a session
-      // several other tables already occupy) - it would ignore their
-      // contribution entirely. Every session column always carries the
-      // group's REAL target on every row regardless of which session that
-      // row occupies (see the "store the group's full target on every
-      // row" note in compute_continuation_flags()), so reading targetCol
-      // here is always accurate even though it's normally shown on only
-      // the session's first row. The row's other two sessions - including
-      // the one just vacated - go back to 0, matching how every OTHER row
-      // in the table already shows 0 in a session cell that isn't its own
-      // (recomputing what the REST of the group's running Diff should
-      // become in the session this row just LEFT would need the full
-      // cascade, which swapping deliberately doesn't touch).
-
-      // Parse a row's Table No. as a number, or null if it isn't one (a
-      // manually-added row with a non-numeric placeholder, or simply
-      // blank). Used to compare Table Nos. for cumulative-Diff purposes.
-      function parseTableNo(tr) {
-        const v = parseFloat(strVal(tr, "Table No."));
-        return isNaN(v) ? null : v;
-      }
-
-      // The REAL cumulative Qty a session would have going INTO this row's
-      // position, if the full server-side cascade were re-run - without
-      // actually re-running it (and risking the cascade pulling in/
-      // dropping OTHER rows, which swapping must never do). Sums this
-      // row's own (about to move) Qty together with every OTHER row in
-      // the SAME group (same Sewing Line/JobCut - Suffix/Mark Type,
-      // scoped to the same building's table since groups never span
-      // buildings) that is CURRENTLY sitting in the target session AND
-      // has a Table No. at or before this row's own - mirroring exactly
-      // how the real cascade processes a group's tables smallest-Table-ID-
-      // first. This only READS sibling rows; none of their own values are
-      // touched, so it can never itself cause another row to appear,
-      // disappear, or change.
-      function cumulativeQtyForSession(tr, targetIdx, movingQty) {
-        const sessionCol = SESSION_CYCLE[targetIdx].cutCol;
-        const groupKeyOfRow = (t) => `${strVal(t, "Sewing Line")}|${strVal(t, "JobCut - Suffix")}|${strVal(t, "Mark Type")}`;
-        const myKey = groupKeyOfRow(tr);
-        const myTableNo = parseTableNo(tr);
-        let sum = movingQty;
-        const tbody = tr.closest("tbody");
-        if (tbody && myTableNo !== null) {
-          Array.from(tbody.querySelectorAll("tr")).forEach((other) => {
-            if (other === tr) return;
-            if (groupKeyOfRow(other) !== myKey) return;
-            const otherTableNo = parseTableNo(other);
-            if (otherTableNo === null || otherTableNo > myTableNo) return; // only earlier-or-equal tables count
-            sum += numVal(other, sessionCol);
-          });
-        }
-        return sum;
-      }
-
+      // Cut Plan values are set directly here; Diff for this row AND every
+      // later table in the group is then corrected by recalcDiffChainFrom()
+      // (see above), and which rows in the group show each session's
+      // target is refreshed by refreshTargetVisibilityForGroup() - both
+      // read-then-write only within this group's own rows, so this can
+      // never add, drop, or reassign any OTHER row.
       function moveRowToSession(tr, targetIdx) {
         const currentIdx = currentSessionIndex(tr);
         if (currentIdx === -1 || currentIdx === targetIdx) return;
@@ -1399,19 +1490,24 @@
           const cutInput = cellInput(tr, s.cutCol);
           const diffInput = cellInput(tr, s.diffCol);
           if (idx === targetIdx) {
-            const target = effectiveTargetForSession(tr, s, idx);
-            const cumulative = cumulativeQtyForSession(tr, targetIdx, qty);
-            if (cutInput) cutInput.value = qty;
-            if (diffInput) diffInput.value = String(cumulative - target);
+            if (cutInput) { cutInput.value = qty; updateOriginalIndicator(cutInput); }
+            // Diff for the new session is computed below by
+            // recalcDiffChainFrom() - leaving it as whatever it was for
+            // now is fine, it's about to be overwritten.
           } else {
-            if (cutInput) cutInput.value = "0";
-            if (diffInput) diffInput.value = "0";
+            // Vacated (or never-occupied) sessions go back to 0 for both
+            // Cut Plan and Diff - a stale nonzero Diff left behind here
+            // would otherwise make currentSessionIndex() (used by
+            // recalcDiffChainFrom() below) think this row still belongs
+            // to its OLD session.
+            if (cutInput) { cutInput.value = "0"; updateOriginalIndicator(cutInput); }
+            if (diffInput) { diffInput.value = "0"; updateOriginalIndicator(diffInput); }
           }
-          if (cutInput) updateOriginalIndicator(cutInput);
-          if (diffInput) updateOriginalIndicator(diffInput);
         });
 
         tr.dataset.manual = "1";
+        recalcDiffChainFrom(tr);
+        refreshTargetVisibilityForGroup(tr);
         updateSwapButtonLabel(tr);
       }
 
@@ -1658,6 +1754,52 @@
         }
       }
 
+      // Shared by both a normal edit ("change" event on a tbody) and the
+      // revert button (revertCell(), below) - whichever RECALC_TRIGGER_COLS
+      // cell just changed (by typing or by reverting), a Sewing target
+      // edit needs syncing across the group and EITHER kind of edit needs
+      // the group's Diff chain recomputed before the server call.
+      function handleRecalcTriggerEdit(target) {
+        const col = target.closest("td")?.getAttribute("data-col");
+        const tr = target.closest("tr");
+        if (Object.values(SESSION_TARGET_COLS).includes(col)) {
+          // A group's Sewing target Morning/Afternoon/OT is stored on
+          // EVERY row (only ONE row actually shows it - see
+          // compute_continuation_flags() - but every row's underlying
+          // value is the same real number). recalc_cut_plan() derives
+          // the group's effective target as the MAX across all its rows,
+          // so editing just the one VISIBLE cell only ever takes effect
+          // when RAISING the target - every other (still-stale, higher)
+          // sibling row would otherwise keep winning the max() and
+          // silently swallow any attempt to LOWER it (or, for
+          // revertCell(), leave the OLD edited value behind on every
+          // sibling row even though the cell that was actually reverted
+          // looks back to normal). Write the new value into every sibling
+          // row in the same group first, so they're all consistent before
+          // the recalc runs either way.
+          const groupRows = groupRowsSortedByTableNo(tr);
+          const newValue = target.value;
+          groupRows.forEach((row) => {
+            const input = cellInput(row, col);
+            if (input && input !== target) {
+              input.value = newValue;
+              updateOriginalIndicator(input);
+            }
+          });
+        }
+        // A target OR Cut Plan Qty change (or revert) can shift every
+        // row's Diff in the group, not just the row that was actually
+        // touched - recompute the whole chain now. This matters most for
+        // lines with no genuine Tab 2 session breakdown (every one of
+        // their rows is permanently manual - see recalc_cut_plan() in
+        // cutplan2/model.py), since the server only echoes their Diff
+        // back unchanged rather than recomputing it; without this,
+        // editing (or reverting) their target or Qty would leave every
+        // Diff stale even after recalcFromServer(). Harmless for a normal
+        // line - the server's response there fully overwrites this anyway.
+        recalcDiffChainForGroup(tr);
+      }
+
       // Revert a single cell back to its original value. Unlike the old
       // simple model, this new one's Diff/session-assignment depends on
       // the WHOLE group's cascading state (see build_cut_plan()), which
@@ -1671,6 +1813,9 @@
         updateOriginalIndicator(input);
 
         const col = input.closest("td")?.getAttribute("data-col");
+        if (RECALC_TRIGGER_COLS.includes(col)) {
+          handleRecalcTriggerEdit(input);
+        }
         if (col === "Table No." || RECALC_TRIGGER_COLS.includes(col)) {
           recalcFromServer();
         }
@@ -1820,9 +1965,9 @@
         // actually typed.
         tb.addEventListener("change", (e) => {
           const col = e.target.closest("td")?.getAttribute("data-col");
-          if (RECALC_TRIGGER_COLS.includes(col)) {
-            recalcFromServer();
-          }
+          if (!RECALC_TRIGGER_COLS.includes(col)) return;
+          handleRecalcTriggerEdit(e.target);
+          recalcFromServer();
         });
 
         // Prevent clicking the remove/revert buttons from blurring whatever
@@ -1842,8 +1987,21 @@
             return;
           }
           if (e.target.closest(".remove-btn")) {
-            e.target.closest("tr").remove();
-            updateRowCount(tb);
+            const tr = e.target.closest("tr");
+            const tbodyEl = tr.closest("tbody");
+            tr.remove();
+            // Removing a row can leave a DIFFERENT row as the new first
+            // row of its Mark Type/JobCut group - e.g. if the row that
+            // used to show the group's Sewing Line/JobCut - Suffix/Mark
+            // Type/session targets (because it was first) just got
+            // deleted, the row that's now first still has those cells
+            // hidden as "continuation" (merged-with-the-row-above)
+            // styling from when it wasn't first. Just removing the <tr>
+            // never recomputes this, so those values would appear to have
+            // vanished even though they're still there. resortTbodyRows()
+            // rebuilds the whole tbody with continuation flags freshly
+            // recomputed against the rows that are ACTUALLY there now.
+            resortTbodyRows(tbodyEl);
             return;
           }
           if (e.target.closest(".swap-session-btn")) {
@@ -1926,47 +2084,79 @@
       });
 
       // Save is a single, page-level action: gather rows from BOTH
-      // buildings' tables together and save them as one zip download (one
-      // click, one file - the zip itself contains a separate workbook per
-      // building, built server-side).
+      // buildings' tables together and save them as one zip (the zip
+      // itself contains a separate workbook per building, built server-
+      // side) - shared by the "Save changes" and "Download Excel"
+      // buttons, which only differ in whether they trigger a download
+      // afterward.
+      async function saveCutPlan(triggerDownload) {
+        statusEl.textContent = triggerDownload ? T.saving : T.saving;
+        statusEl.className = "status";
+
+        const rows = collectAllRows();
+
+        try {
+          const resp = await fetch(`/update-cut-plan/${JOB_ID}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ rows }),
+          });
+          if (!resp.ok) {
+            const errBody = await resp.json().catch(() => ({}));
+            throw new Error(errBody.error || `Server returned ${resp.status}`);
+          }
+          const data = await resp.json();
+
+          if (triggerDownload && data.zip_url) {
+            statusEl.textContent = T.downloading;
+            const a = document.createElement("a");
+            a.href = data.zip_url;
+            a.download = data.zip_filename || "Cut Plan.zip";
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          }
+
+          const names = (data.buildings || []).join(", ");
+          if (!(data.buildings || []).length) {
+            statusEl.textContent = T.saved_nothing;
+          } else if (triggerDownload) {
+            statusEl.textContent = `${T.saved_downloading} ${data.zip_filename} (${names})`;
+          } else {
+            statusEl.textContent = `${T.saved_only} (${names})`;
+          }
+        } catch (err) {
+          // A cut plan can stop existing server-side (e.g. the app was
+          // updated/restarted since it was generated) while the browser
+          // still has the old page open with its now-orphaned JOB_ID -
+          // give a clear explanation and an easy way to recover, rather
+          // than just the raw server error.
+          if (String(err.message).toLowerCase().includes("no longer available")) {
+            statusEl.innerHTML = "";
+            const p1 = document.createElement("span");
+            p1.textContent = T.session_expired;
+            const p2 = document.createElement("span");
+            p2.textContent = ` ${T.regenerate_prompt} `;
+            const link = document.createElement("a");
+            link.href = "?tab=3";
+            link.textContent = T.regenerate_link;
+            statusEl.appendChild(p1);
+            statusEl.appendChild(p2);
+            statusEl.appendChild(link);
+          } else {
+            statusEl.textContent = `${T.error_prefix} ${err.message}`;
+          }
+          statusEl.className = "status error";
+        }
+      }
+
       const saveBtn = document.getElementById("cutplan-save-btn");
       if (saveBtn) {
-        saveBtn.addEventListener("click", async () => {
-          statusEl.textContent = T.saving;
-          statusEl.className = "status";
-
-          const rows = collectAllRows();
-
-          try {
-            const resp = await fetch(`/update-cut-plan/${JOB_ID}`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ rows }),
-            });
-            if (!resp.ok) {
-              const errBody = await resp.json().catch(() => ({}));
-              throw new Error(errBody.error || `Server returned ${resp.status}`);
-            }
-            const data = await resp.json();
-
-            if (data.zip_url) {
-              const a = document.createElement("a");
-              a.href = data.zip_url;
-              a.download = data.zip_filename || "Cut Plan.zip";
-              document.body.appendChild(a);
-              a.click();
-              a.remove();
-            }
-
-            const names = (data.buildings || []).join(", ");
-            statusEl.textContent = (data.buildings || []).length
-              ? `${T.saved_downloading} ${data.zip_filename} (${names})`
-              : T.saved_nothing;
-          } catch (err) {
-            statusEl.textContent = `${T.error_prefix} ${err.message}`;
-            statusEl.className = "status error";
-          }
-        });
+        saveBtn.addEventListener("click", () => saveCutPlan(false));
+      }
+      const downloadBtn = document.getElementById("cutplan-download-btn");
+      if (downloadBtn) {
+        downloadBtn.addEventListener("click", () => saveCutPlan(true));
       }
 
       // Dismissible flag/notice - purely client-side, just hides the banner.

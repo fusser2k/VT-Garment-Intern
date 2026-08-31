@@ -172,7 +172,7 @@ def _render(active_tab: int):
         js_t=js_translations(lang),
         fallback_session_targets={
             line: list(target)
-            for line, target in ((state["cutplan"] or {}).get("run_info") or {}).get("blank_target_display_lines_targets", {}).items()
+            for line, target in ((state["cutplan"] or {}).get("run_info") or {}).get("fallback_session_targets", {}).items()
         },
     )
 
@@ -360,7 +360,10 @@ def cut_plan():
     # "Sewing Target Per Day (with OT)" figure. Fill in a single-session
     # (Morning-only) fallback plan for exactly those lines, WITHOUT
     # overriding any line Tab 2 already covers for real (dict.setdefault
-    # only inserts when the key is missing).
+    # only inserts when the key is missing). The plan still shows these
+    # lines' real Morning/Afternoon/OT numbers normally (946/0/0 etc.) -
+    # they're genuine, known values, just sourced from Tab 1 instead of
+    # Tab 2, so there's no reason to hide them from the user.
     lines_with_real_wip_coverage = set(wip_session_targets.keys())
     fallback_targets, fallback_restrictions = compute_fallback_day_target_plan(extraction["df"])
     for line, target in fallback_targets.items():
@@ -368,11 +371,10 @@ def cut_plan():
     for line, allowed in fallback_restrictions.items():
         wip_jobcut_restrictions.setdefault(line, allowed)
 
-    # Only blank a line's Sewing target Morning/Afternoon/OT display if it
-    # genuinely has no real Tab 2 coverage (the fallback actually had to
-    # fill it in) - a FALLBACK_TARGET_LINES line that DOES have real Tab 2
-    # data should still show its real numbers normally.
-    blank_target_display_lines = set(fallback_targets.keys()) - lines_with_real_wip_coverage
+    # Lines that GENUINELY needed the fallback (no real Tab 2 coverage at
+    # all) get every one of their rows treated as permanently manual on
+    # every future recalculation - see recalc_cut_plan()'s docstring.
+    manual_only_lines = set(fallback_targets.keys()) - lines_with_real_wip_coverage
 
     run_datetime = now_th()
 
@@ -380,7 +382,7 @@ def cut_plan():
         plan_df, run_info = build_cut_plan(
             extraction["df"], wip_session_targets, run_datetime,
             wip_jobcut_restrictions=wip_jobcut_restrictions,
-            blank_target_display_lines=blank_target_display_lines,
+            manual_only_lines=manual_only_lines,
         )
         job_id = uuid.uuid4().hex[:8]
     except Exception as e:

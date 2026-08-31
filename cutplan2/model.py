@@ -1085,14 +1085,17 @@ def compute_continuation_flags(rows) -> list:
         Mark Type - so they re-display at the start of every Mark Type
         sub-block.
       - Sewing target Morning/Afternoon/OT are shown ONLY on the first row
-        of their OWN session within a Mark Type - every other row hides
-        them, whether that other row is a LATER table in the same session
-        (a true repeat) or a table in a DIFFERENT session entirely (which
-        never had that target apply to it in the first place). build_cut_plan()/
-        recalc_cut_plan() store the group's full target on every row
-        regardless of session (consistent with how every other merge-eligible
-        column works), so this function is what actually limits each target
-        to appearing once, on the session's first table.
+        of their OWN session within a Mark Type - e.g. Sewing target
+        Afternoon shows on whichever row is the first to have Qty planned
+        into Afternoon, not on the Mark Type's very first row. Every other
+        row hides them, whether that other row is a LATER table in the
+        same session (a true repeat) or a table in a DIFFERENT session
+        entirely (which never had that target apply to it in the first
+        place). build_cut_plan()/recalc_cut_plan() store the group's full
+        target on every row regardless of session (consistent with how
+        every other merge-eligible column works), so this function is what
+        actually limits each target to appearing once, on the session's
+        first table.
       - A session can be SKIPPED ENTIRELY - e.g. two tables together already
         cover all of Morning's and Afternoon's capacity, so the next table
         jumps straight into OT and no row ever "belongs to" Afternoon (see
@@ -1101,9 +1104,9 @@ def compute_continuation_flags(rows) -> list:
         though its Qty planned is 0 for every row - it's shown alongside
         the target of whichever row is the first to move on to a LATER
         session, and/or on the group's very last row if the group ends
-        before ever reaching a later session at all (this also covers the
-        old single-row-group case: Morning alone can cover the whole day,
-        so Afternoon/OT are shown on that same row for context).
+        before ever reaching a later session at all (this also covers a
+        single-row group: Morning alone can cover the whole day, so
+        Afternoon/OT are shown on that same row for context).
 
     rows: list of dicts (same shape as CUT_PLAN_COLUMNS rows), already
     sorted by Sewing Line -> JobCut - Suffix -> Mark Type -> Table No.
@@ -1177,7 +1180,7 @@ def build_cut_plan(
     wip_session_targets: dict,
     run_datetime: Optional[datetime] = None,
     wip_jobcut_restrictions: Optional[dict] = None,
-    blank_target_display_lines: Optional[set] = None,
+    manual_only_lines: Optional[set] = None,
 ):
     """Build the Tab 3 cut plan from Tab 1's extracted DataFrame, using
     Tab 2's per-Sewing-Line Morning/Afternoon/OT targets (see
@@ -1242,20 +1245,11 @@ def build_cut_plan(
          planning) had no WIP coverage and were skipped, so the UI can
          surface this clearly instead of silently producing an
          incomplete-looking plan.
-      5. blank_target_display_lines (typically FALLBACK_TARGET_LINES' entries
-         that actually got a fallback target - see
-         compute_fallback_day_target_plan()) get their Sewing target
-         Morning/Afternoon/OT columns written as "" rather than the real
-         numbers used internally for the cascade - these lines only ever
-         have a single overall day target, no genuine Tab 2 session
-         breakdown, so displaying a synthesized Morning target would make
-         it look like real Tab 2 data. Sewing Target Per Day (the one
-         figure these lines DO genuinely have, from Tab 1) is unaffected.
 
     Returns (plan_df, run_info).
     """
-    blank_target_display_lines = blank_target_display_lines or set()
     table_level = _candidate_table_pool(df, wip_jobcut_restrictions=wip_jobcut_restrictions)
+    fallback_targets_for_run_info, _ = compute_fallback_day_target_plan(df)
 
     group_cols = ["Sewing Line", "JobCut - Suffix", "Mark Type"]
     # Sort candidates by Sewing Line -> JobCut - Suffix -> Mark Type -> Table ID
@@ -1298,29 +1292,19 @@ def build_cut_plan(
             cumulative_target_upto.append(running_target)
 
         def blank_row(table_id, qty_for_col=None):
-            # Sewing target Morning/Afternoon/OT are shown to the user as if
-            # they came from Tab 2's real per-session breakdown - for lines
-            # in blank_target_display_lines (see compute_fallback_day_target_plan()),
-            # there IS no such breakdown, only a single overall day target,
-            # so displaying a synthesized "Morning target" would misrepresent
-            # it as real Tab 2 data. The cascade above still uses the real
-            # target_morning/afternoon/ot numbers to plan correctly (that
-            # part is unaffected) - only what gets WRITTEN into these three
-            # display columns changes, to "" instead of the number.
-            is_blank_target_line = sewing_line in (blank_target_display_lines or set())
             row = {
                 "Sewing Line": sewing_line,
                 "JobCut - Suffix": jobcut_suffix,
                 "Sewing Target Per Day": int(sewing_target_per_day),
                 "Mark Type": mark_type,
                 "Table No.": table_id,
-                "Sewing target Morning": "" if is_blank_target_line else int(target_morning),
+                "Sewing target Morning": int(target_morning),
                 "Cut Plan Morning": 0,
                 "Diff (Morning)": 0,
-                "Sewing target Afternoon": "" if is_blank_target_line else int(target_afternoon),
+                "Sewing target Afternoon": int(target_afternoon),
                 "Cut Plan Afternoon": 0,
                 "Diff (Afternoon)": 0,
-                "Sewing target OT": "" if is_blank_target_line else int(target_ot),
+                "Sewing target OT": int(target_ot),
                 "Cut Plan OT": 0,
                 "Diff (OT)": 0,
                 "Note": "",  # left blank - purely for the user's own manual comments
@@ -1384,23 +1368,26 @@ def build_cut_plan(
         # round-tripped through the browser as JSON), so keeping this as a
         # plain dict of sets here is fine.
         "wip_jobcut_restrictions": wip_jobcut_restrictions or {},
-        # Carried through so recalc_cut_plan() blanks the SAME lines'
-        # Sewing target Morning/Afternoon/OT display on every future
-        # recalculation too, consistent with this initial generation -
-        # without this, recalc_cut_plan would have to re-derive it fresh
-        # from source_df each time (see compute_fallback_day_target_plan()),
-        # which can't tell apart a FALLBACK_TARGET_LINES line that ALSO
-        # happens to have real Tab 2 coverage (rare, but possible) from one
-        # that genuinely has none.
-        "blank_target_display_lines": set(blank_target_display_lines),
-        # The actual (Morning, Afternoon, OT) numbers behind each blanked
-        # line, for the browser's own swap-Diff calculation (see
-        # templates/index.html's FALLBACK_SESSION_TARGETS) - it can't read
-        # these back out of the (deliberately blank) Sewing target cells
-        # the way it normally would.
-        "blank_target_display_lines_targets": {
-            line: tuple(wip_session_targets.get(line, (0.0, 0.0, 0.0))) for line in blank_target_display_lines
-        },
+        # The real (Morning, Afternoon, OT) numbers for any of
+        # FALLBACK_TARGET_LINES present in this data (see
+        # compute_fallback_day_target_plan()) - purely a defensive backstop
+        # for the browser's swap-Diff calculation (see templates/
+        # index.html's FALLBACK_SESSION_TARGETS) in the rare case a
+        # manually-added row's Sewing target cells are genuinely blank
+        # (e.g. a brand new group with no other row yet to supply a real
+        # target) - every ordinarily-generated row already carries its own
+        # real numeric target directly, so this is rarely needed.
+        "fallback_session_targets": dict(fallback_targets_for_run_info),
+        # Sewing Lines that GENUINELY needed the FALLBACK_TARGET_LINES
+        # fallback (no real Tab 2 session-target coverage at all) - as
+        # opposed to a FALLBACK_TARGET_LINES line that happens to ALSO
+        # have real Tab 2 coverage, which should keep behaving completely
+        # normally. Carried through so recalc_cut_plan() can treat every
+        # row for these specific lines as permanently manual (see its
+        # docstring) - editing their target/Qty only changes what's
+        # displayed, it never automatically adds or drops tables, since
+        # there's no genuine Tab 2 breakdown to justify doing so.
+        "manual_only_lines": set(manual_only_lines or set()),
     }
     return plan_df, run_info
 
@@ -1472,27 +1459,32 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
         forward via run_info["wip_jobcut_restrictions"] - a JobCut a
         Sewing Line's Detail cells didn't mention still can't be pulled in
         by raising a target, for consistency with the original plan.
+      - Sewing Lines with no genuine Tab 2 session breakdown (see
+        FALLBACK_TARGET_LINES / compute_fallback_day_target_plan()) have
+        EVERY one of their rows treated as manually-kept, regardless of
+        that row's own "_manual" flag - these lines' Morning/Afternoon/OT
+        targets are only ever a single Sewing Target Per Day figure being
+        used as a stand-in, not a real per-session breakdown from Tab 2,
+        so there's no genuine basis for automatically adding or dropping
+        tables when the user edits it. Editing the target (or a Cut Plan
+        Qty) for one of these lines only ever changes what's displayed on
+        the rows already there - the initial set of tables from
+        build_cut_plan() stays exactly as generated until the user adds or
+        removes tables by hand.
 
     Returns a fresh plan_df (same columns/shape as build_cut_plan's output).
     """
     wip_jobcut_restrictions = run_info.get("wip_jobcut_restrictions") or {}
     table_level = _candidate_table_pool(source_df, wip_jobcut_restrictions=wip_jobcut_restrictions)
-
-    # Lines in this set never show real numbers in their Sewing target
-    # Morning/Afternoon/OT cells at all (see build_cut_plan()'s matching
-    # blank_target_display_lines behavior) - only a single overall day
-    # target from Tab 1, no genuine Tab 2 session breakdown. Since their
-    # displayed target cells are blank, they can't be read back out of
-    # current_rows the normal way below. Prefer whatever build_cut_plan()
-    # already decided (carried through run_info) so a line that happens to
-    # have BOTH fallback candidacy and real Tab 2 coverage stays consistent
-    # across recalculations; fall back to recomputing fresh from source_df
-    # only if run_info predates this field.
-    if "blank_target_display_lines" in run_info:
-        blank_target_display_lines = run_info["blank_target_display_lines"]
-        fallback_targets, _ = compute_fallback_day_target_plan(source_df, lines=blank_target_display_lines)
+    if "manual_only_lines" in run_info:
+        # Prefer what build_cut_plan() already determined (it can tell a
+        # FALLBACK_TARGET_LINES line that ALSO has real Tab 2 coverage
+        # apart from one that genuinely needed the fallback - this
+        # function only has source_df, which can't make that distinction).
+        manual_only_lines = run_info["manual_only_lines"]
     else:
-        fallback_targets, _ = compute_fallback_day_target_plan(source_df)
+        manual_only_lines, _ = compute_fallback_day_target_plan(source_df)
+        manual_only_lines = set(manual_only_lines.keys())
 
     # Index candidates for fast lookup: (Sewing Line, JobCut - Suffix, Mark Type) -> DataFrame.
     # Keys are normalized to strings on BOTH sides (here, and again below when
@@ -1533,16 +1525,9 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
         # Round UP for the same reason as build_cut_plan() - the user could
         # type in a fractional target directly, and it should never make
         # the group look like it needs less than it actually does.
-        if sewing_line in fallback_targets:
-            # This line's target cells are deliberately blank in the UI
-            # (see the fallback_targets comment above) - use the real
-            # numbers recomputed from source_df rather than reading back
-            # whatever's (blank) in the row.
-            target_morning, target_afternoon, target_ot = (math.ceil(t) for t in fallback_targets[sewing_line])
-        else:
-            target_morning = math.ceil(max((to_num(r.get("Sewing target Morning")) for r in user_rows), default=0.0))
-            target_afternoon = math.ceil(max((to_num(r.get("Sewing target Afternoon")) for r in user_rows), default=0.0))
-            target_ot = math.ceil(max((to_num(r.get("Sewing target OT")) for r in user_rows), default=0.0))
+        target_morning = math.ceil(max((to_num(r.get("Sewing target Morning")) for r in user_rows), default=0.0))
+        target_afternoon = math.ceil(max((to_num(r.get("Sewing target Afternoon")) for r in user_rows), default=0.0))
+        target_ot = math.ceil(max((to_num(r.get("Sewing target OT")) for r in user_rows), default=0.0))
         # Preserve whatever's already in the user's current rows for Sewing
         # Target Per Day, rather than re-deriving it from the three
         # (already-rounded) session targets above - this function only ever
@@ -1554,6 +1539,19 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
         sewing_target_per_day = int(max((to_num(r.get("Sewing Target Per Day")) for r in user_rows), default=0.0))
 
         candidates = candidates_by_group.get(key)
+        if sewing_line in manual_only_lines:
+            # This line has no genuine Tab 2 session-target breakdown to
+            # justify automatically adding tables (see this function's
+            # docstring) - empty the candidate pool entirely so the normal
+            # cascading loop below has nothing left to auto-select from,
+            # not just excluding the tables already on the page. Without
+            # this, any OTHER real Pending table for this group that
+            # simply wasn't part of the original selection could still get
+            # silently pulled in by the cascade the moment enough "room"
+            # opened up (e.g. after lowering the target) - the whole point
+            # here is that nothing gets added or dropped automatically at
+            # all for these lines.
+            candidates = None
 
         # Build override map: Table ID (int) -> user's current Qty for that
         # row (summed across whichever of the three Cut Plan columns it's
@@ -1594,7 +1592,7 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
                 candidates is not None and table_id is not None
                 and (candidates["Table ID"] == table_id).any()
             )
-            is_manual = bool(r.get("_manual"))
+            is_manual = bool(r.get("_manual")) or sewing_line in manual_only_lines
 
             if is_manual:
                 manual_rows.append(r)
@@ -1673,11 +1671,6 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
                     # here, mirroring build_cut_plan()'s rule 3b.
                     break
 
-        is_blank_target_line = sewing_line in fallback_targets
-        display_target_morning = "" if is_blank_target_line else int(target_morning)
-        display_target_afternoon = "" if is_blank_target_line else int(target_afternoon)
-        display_target_ot = "" if is_blank_target_line else int(target_ot)
-
         for row_out in selected_rows_out:
             table_id = row_out["table_id"]
             note = note_by_table.get(table_id, "")
@@ -1688,13 +1681,13 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
                     "Sewing Target Per Day": int(sewing_target_per_day),
                     "Mark Type": mark_type,
                     "Table No.": table_id,
-                    "Sewing target Morning": display_target_morning,
+                    "Sewing target Morning": int(target_morning),
                     "Cut Plan Morning": row_out["Cut Plan Morning"],
                     "Diff (Morning)": row_out["Diff (Morning)"],
-                    "Sewing target Afternoon": display_target_afternoon,
+                    "Sewing target Afternoon": int(target_afternoon),
                     "Cut Plan Afternoon": row_out["Cut Plan Afternoon"],
                     "Diff (Afternoon)": row_out["Diff (Afternoon)"],
-                    "Sewing target OT": display_target_ot,
+                    "Sewing target OT": int(target_ot),
                     "Cut Plan OT": row_out["Cut Plan OT"],
                     "Diff (OT)": row_out["Diff (OT)"],
                     "Note": note,
@@ -1710,13 +1703,13 @@ def recalc_cut_plan(source_df: pd.DataFrame, current_rows: list, run_info: dict)
                     "Sewing Target Per Day": int(sewing_target_per_day),
                     "Mark Type": mark_type,
                     "Table No.": r.get("Table No.", ""),
-                    "Sewing target Morning": display_target_morning,
+                    "Sewing target Morning": int(target_morning),
                     "Cut Plan Morning": int(to_num(r.get("Cut Plan Morning"))),
                     "Diff (Morning)": int(to_num(r.get("Diff (Morning)"))),
-                    "Sewing target Afternoon": display_target_afternoon,
+                    "Sewing target Afternoon": int(target_afternoon),
                     "Cut Plan Afternoon": int(to_num(r.get("Cut Plan Afternoon"))),
                     "Diff (Afternoon)": int(to_num(r.get("Diff (Afternoon)"))),
-                    "Sewing target OT": display_target_ot,
+                    "Sewing target OT": int(target_ot),
                     "Cut Plan OT": int(to_num(r.get("Cut Plan OT"))),
                     "Diff (OT)": int(to_num(r.get("Diff (OT)"))),
                     "Note": r.get("Note", ""),
