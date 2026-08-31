@@ -479,9 +479,12 @@ For each (Sewing Line, JobCut - Suffix, Mark Type) group in Tab 1's data:
   and no "Manually edited on …" stamp either) — a plain data table either
   way.
 
-Edits are held in the server's memory for the life of that session (this is
-a local single-user tool, not a hosted multi-user service). If you restart
-the server mid-edit, generate the cut plan again from Tab 3.
+Edits are saved to a `sessions.pkl` file alongside `app.py` after every
+request, and reloaded from there automatically the next time the app starts
+- so restarting the server (including Flask's own debug-mode auto-reloader,
+which restarts the whole process whenever a `.py` file changes) no longer
+loses anyone's Tab 1/2/3 data. Delete `sessions.pkl` by hand at any time to
+reset everyone to a clean slate.
 
 Stop the server with `Ctrl+C` in the terminal.
 
@@ -546,19 +549,23 @@ a code-execution console if something crashes.
 import error, etc.) rather than just the generic error page.
 
 **Important: keep `--workers 1`.** This app keeps each browser's Tab 1/2/3
-data in an in-memory `SESSIONS` dict (see `app.py`) — that memory is *not*
-shared between separate worker processes. Running with more than one worker
-would randomly show a different (or empty) session depending on which
-worker handled a given request. If you need more concurrency, increase
-`--threads` instead of `--workers`.
+data in an in-memory `SESSIONS` dict, persisted to a `sessions.pkl` file
+alongside `app.py` (see `app.py`) - but that file is only read once, at
+startup, by whichever worker process happens to load it. Running with more
+than one worker would randomly show a different (or empty) session
+depending on which worker handled a given request, since each worker's
+in-memory copy can drift out of sync with what's on disk. If you need more
+concurrency, increase `--threads` instead of `--workers`.
 
-**The filesystem (and `SESSIONS`) is reset on every redeploy.** Uploaded
-files and generated Excel files live on Railway's container filesystem,
-which persists between requests but is wiped clean on every new
-deploy/restart. Since none of the app's core planning logic depends on
-persisted state between deploys (Tab 3's Morning/Afternoon split is
+**`sessions.pkl` (and any uploaded/generated files) is still reset on every
+redeploy.** Railway gives each new deploy a fresh container filesystem, so
+while `sessions.pkl` now survives the app process restarting *within* the
+same container (e.g. a crash-and-recover, or gunicorn recycling a worker),
+it does not survive an actual new deploy - same as uploaded files and
+generated Excel files. Since none of the app's core planning logic depends
+on persisted state between deploys (Tab 3's Morning/Afternoon split is
 recomputed fresh from Tab 1's data every time), this doesn't affect
-correctness — it just means uploaded files and past sessions don't survive
-a redeploy, same as restarting the app locally.
+correctness - it just means past sessions don't carry over to a brand-new
+deploy.
 
 

@@ -2130,8 +2130,27 @@
           // updated/restarted since it was generated) while the browser
           // still has the old page open with its now-orphaned JOB_ID -
           // give a clear explanation and an easy way to recover, rather
-          // than just the raw server error.
-          if (String(err.message).toLowerCase().includes("no longer available")) {
+          // than just the raw server error. A DIFFERENT failure mode -
+          // fetch() itself never completing (network dropped, the server
+          // was unreachable for a moment, etc.) - always throws a
+          // TypeError, distinguishable from the plain Error thrown above
+          // for a real HTTP error response. Nothing on the page is lost
+          // either way - all the edits stay right where they are - so a
+          // network failure just needs a retry, not a full regenerate.
+          if (err instanceof TypeError) {
+            statusEl.innerHTML = "";
+            const p1 = document.createElement("span");
+            p1.textContent = `${T.network_error} `;
+            const link = document.createElement("a");
+            link.href = "#";
+            link.textContent = T.retry_link;
+            link.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              saveCutPlan(triggerDownload);
+            });
+            statusEl.appendChild(p1);
+            statusEl.appendChild(link);
+          } else if (String(err.message).toLowerCase().includes("no longer available")) {
             statusEl.innerHTML = "";
             const p1 = document.createElement("span");
             p1.textContent = T.session_expired;

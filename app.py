@@ -19,6 +19,7 @@ Then open http://127.0.0.1:5001 (see README.md for local-network access).
 """
 
 import os
+import pickle
 import traceback
 import uuid
 import zipfile
@@ -72,9 +73,51 @@ app.config["MAX_CONTENT_LENGTH"] = 25 * 1024 * 1024  # 25 MB upload limit
 
 # In-memory store, keyed by a per-browser session id: holds each tab's last
 # result so switching tabs (or reloading) doesn't lose what's already there.
-# This is a local single-user tool, not built for a hosted multi-user service —
-# restarting the server clears everything (just re-upload).
-SESSIONS = {}
+# Persisted to SESSIONS_FILE on disk after every request (see
+# _persist_sessions()/_save_sessions_after_request() below) and reloaded from
+# there at startup, specifically so that Flask's own debug-mode auto-reloader
+# (restarts the whole process whenever a .py file changes - the default here,
+# see FLASK_DEBUG below) doesn't wipe out everyone's Tab 1/2/3 data the
+# moment an updated version of this app gets deployed. This is still a
+# local/small-team tool, not a hosted multi-user service with a real
+# database - a corrupt or incompatible sessions.pkl (e.g. after a code change
+# altered what a session dict looks like) is discarded rather than crashing
+# the app; deleting sessions.pkl by hand always resets everyone to a clean
+# slate too.
+SESSIONS_FILE = os.path.join(BASE_DIR, "sessions.pkl")
+
+
+def _load_sessions() -> dict:
+    if os.path.exists(SESSIONS_FILE):
+        try:
+            with open(SESSIONS_FILE, "rb") as f:
+                return pickle.load(f)
+        except Exception:
+            traceback.print_exc()
+    return {}
+
+
+SESSIONS = _load_sessions()
+
+
+def _persist_sessions() -> None:
+    try:
+        tmp_path = SESSIONS_FILE + ".tmp"
+        with open(tmp_path, "wb") as f:
+            pickle.dump(SESSIONS, f)
+        os.replace(tmp_path, SESSIONS_FILE)  # atomic on POSIX - never leaves a half-written file behind
+    except Exception:
+        # Never let a persistence failure break the actual HTTP response -
+        # worst case, this one request's changes just don't survive a
+        # restart, exactly like before this feature existed.
+        traceback.print_exc()
+
+
+@app.after_request
+def _save_sessions_after_request(response):
+    _persist_sessions()
+    return response
+
 
 WIP_PREVIEW_ROW_LIMIT = 200
 

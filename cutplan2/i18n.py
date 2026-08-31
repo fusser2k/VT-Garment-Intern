@@ -209,6 +209,11 @@ TRANSLATIONS = {
     },
     "js_regenerate_prompt": {"en": "Please regenerate the cut plan and redo your edits.", "th": "กรุณาสร้างแผนการตัดใหม่แล้วทำการแก้ไขอีกครั้ง"},
     "js_regenerate_link": {"en": "Regenerate now", "th": "สร้างแผนใหม่ตอนนี้"},
+    "js_network_error": {
+        "en": "Couldn't reach the server - check your connection (or the server may have restarted) and try again.",
+        "th": "ไม่สามารถเชื่อมต่อกับเซิร์ฟเวอร์ได้ — โปรดตรวจสอบการเชื่อมต่อของคุณ (หรือเซิร์ฟเวอร์อาจรีสตาร์ทอยู่) แล้วลองอีกครั้ง",
+    },
+    "js_retry_link": {"en": "Try again", "th": "ลองอีกครั้ง"},
     "js_undo_edit": {"en": "Undo this edit", "th": "เลิกทำการแก้ไขนี้"},
     "js_remove_row": {"en": "Remove row", "th": "ลบแถว"},
     "js_insert_row_below": {"en": "Insert a new row below this one", "th": "แทรกแถวใหม่ใต้แถวนี้"},
